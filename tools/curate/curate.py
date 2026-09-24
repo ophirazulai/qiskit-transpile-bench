@@ -288,8 +288,9 @@ def curate(source, root=ROOT):
                 for q in i.qubits
             }
         )
+        suffix = "+sabre" if variant == "sabre_methods" else ""
         case = dict(
-            case_id=f"{prefix}/{name}{'+sabre' if variant == 'sabre_methods' else ''}/{target_id}/L{level}",
+            case_id=f"{prefix}/{name}{suffix}/{target_id}/L{level}",
             role=role,
             family=row["family"],
             input_group=name,
@@ -342,7 +343,7 @@ def curate(source, root=ROOT):
                 )
     for name, levels in [("su2_circular_n100", [2]), ("long_2q_sequence", [2, 3])]:
         row = next(r for r in catalog if r["input_group"] == name)
-        iteration.extend(make_case(row, l, "canary", "iterations") for l in levels)
+        iteration.extend(make_case(row, level, "canary", "iterations") for level in levels)
     timing = []
 
     def timed(case, id_, seed, mode="timing_e2e", panel="timing"):
@@ -464,7 +465,8 @@ def curate(source, root=ROOT):
         "Qiskit-derived artifacts retain the Apache-2.0 license in LICENSE-QISKIT.txt.",
         "QUEKO source: https://github.com/UCLA-VAST/QUEKO-benchmark (BSD-3-Clause).",
         "The six RevLib artifacts with unresolved terms were replaced under plan section 3.8.",
-        "Each replacement is a distinct upstream synthesis-library construction; the manifest records the mapping.",
+        "Each replacement is a distinct upstream synthesis-library construction; "
+        "the manifest records the mapping.",
         "Baseline roles, cost, and oracle coverage still require controlled-runner qualification.",
         "",
         "| Fixture | Upstream source | License / availability |",

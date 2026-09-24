@@ -33,6 +33,25 @@ not measurements of an evolved Qiskit revision.
   runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
 
+## Implementation validation (2026-09-24)
+
+- All 77 automated tests pass; repository-wide Ruff and whitespace checks pass.
+- A native smoke run built two isolated release wheels from local Qiskit revision
+  `c062c2dfd240b23157fbfcf6184e8998a9c8b343` (2.6.0.dev0) and completed all 24 quality
+  observations: 12 iteration cases in each build. Smoke does not produce a benchmark verdict.
+- All 120 level-2 behavioral fixture configurations passed against the pinned 2.5.2
+  worker/verifier setup. Other levels are exercised by the full qualification suite.
+- With the native 2.6.0.dev0 worker, all three 100-qubit Clifford prefixes verified. The full
+  Heisenberg variant also verified; the full QFT and QAOA variants remained unverified
+  because their compiled outputs contained non-Clifford rotations.
+- The eligible `ripple_adder_10` C1-lite check verified on a 23-qubit union. End-to-end timing,
+  reused-pass-manager timing, preset construction, and memory worker modes completed.
+- The built wheel includes all 271 confirm cases, and its coordinator imports without Qiskit.
+
+Local evidence is under `results/validation/summary.json`, `results/smoke-validation/`,
+and `results/compatibility-validation/`. These checks establish implementation behavior;
+they do not qualify a controlled runner or demonstrate a candidate improvement.
+
 ## Qualification work that requires a runner and review
 
 1. Run both baseline builds, the complete correctness suite, B0/KB1/KB2 quality collection,

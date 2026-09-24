@@ -295,3 +295,33 @@ def test_batched_routing_prefixes_preserve_per_seed_checks(tmp_path):
         )
         comparison.check_routing("baseline", case, observation, prefixes)
         assert observation["checks"][0]["status"] == "verified", observation
+
+
+def test_build_timeout_terminates_descendants(tmp_path):
+    from qtb.envbuild import run_logged
+
+    # A descendant would write this marker after its parent times out unless
+    # the entire build process group is terminated.
+    marker = tmp_path / "orphan-finished"
+    child = (
+        "import time; from pathlib import Path; time.sleep(1); Path("
+        + repr(str(marker))
+        + ").touch()"
+    )
+    parent = (
+        'import subprocess,sys,time; subprocess.Popen([sys.executable,"-c",'
+        + repr(child)
+        + "]); time.sleep(10)"
+    )
+    with pytest.raises(HarnessError, match="timed out"):
+        run_logged(
+            [sys.executable, "-c", parent],
+            tmp_path,
+            sanitized_environment(),
+            tmp_path / "build.log",
+            timeout=0.5,
+        )
+    import time
+
+    time.sleep(1)
+    assert not marker.exists()

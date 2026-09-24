@@ -21,7 +21,7 @@ channel, locked dependencies, sanitized environment variables, and native-extens
 **Qualification remains required.** This repository ships executable profiles and harness
 validation, not a claim that a controlled runner has qualified them. Automatic `PASS`
 requires all correctness, baseline, calibration, coverage, and qualification records.
-Missing or unverified evidence remains `INCONCLUSIVE`. In particular, the baseline's
+Missing or unverified required evidence prevents `PASS`. In particular, the baseline's
 output-pinned upstream-test exclusions need the reviewed derivation described in the plan.
 See [qualification and implementation status](docs/implementation-status.md).
 

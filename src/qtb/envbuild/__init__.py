@@ -3,6 +3,7 @@
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tomllib
@@ -192,15 +193,20 @@ def run_logged(command, cwd, env, log, timeout=3600):
         stream.write(("COMMAND " + repr(list(map(str, command))) + "\n").encode())
         stream.flush()
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 list(map(str, command)),
                 cwd=cwd,
                 env=env,
                 stdout=stream,
                 stderr=subprocess.STDOUT,
-                timeout=timeout,
-                check=False,
+                start_new_session=True,
             )
+            try:
+                proc.wait(timeout=timeout)
+            finally:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise HarnessError(f"Build command failed: {exc}; log: {log}") from exc
     if proc.returncode:
