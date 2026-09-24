@@ -125,6 +125,12 @@ def preflight(comparison, cases, force=False):
         for block in ("B0", "KB1", "KB2"):
             comparison.quality(cases, block=block, revisions=("baseline",))
         quality = calibrate_quality(comparison, cases)
+        quality["role_failures"] = freeze_roles(comparison, cases)
+        quality["freeze_allowed"] &= not quality["role_failures"]
+        if quality["role_failures"]:
+            comparison.evidence(record("baseline/preflight", "correctness", "failed", "reference",
+                                       detail="Proposed deterministic or canary role failed the 300-seed audit",
+                                       cases=quality["role_failures"]))
         cost = {}
         for name, (panel, estimator) in cost_panels(comparison, all_panels=True).items():
             comparison.progress(f"Calibrating {name}: two independent baseline builds.")
@@ -189,3 +195,40 @@ def measure_costs(comparison):
                 **{k: v for k, v in result.items() if k != "result"},
             )
         )
+
+
+def freeze_roles(comparison, cases):
+    """Verify every proposed seed-blind role across all 300 baseline seeds."""
+    from qtb.coordinator import structural_result
+    from qtb.coordinator.storage import append_record
+
+    path = comparison.directory/'role-freeze.jsonl'
+    saved = read_records(path)
+    known = {(r['case_id'],r['seed']): r for r in saved}
+    failures = []
+    ordinary = read_records(comparison.directory/'observations.jsonl')
+    for row in ordinary:
+        if row['revision'] == 'baseline' and 'D2' in row and 'N2' in row:
+            known.setdefault((row['case_id'],row['seed']),row)
+    for case in cases:
+        if case['role'] not in {'deterministic','zero_baseline','canary'}:
+            continue
+        target=read_json(comparison.fixtures/case['target']['file'])
+        missing=[seed for seed in range(300) if (case['case_id'],seed) not in known]
+        for start in range(0,len(missing),25):
+            for result in comparison.job('baseline',case,'quality',missing[start:start+25]):
+                row={'case_id':case['case_id'],'seed':result['seed']}
+                if result['status']=='ok':
+                    row.update(structural_result(result['output'],target,result['layout'],case['logical_qubits']))
+                else:
+                    row['status']='mismatch'
+                append_record(path,row);known[case['case_id'],result['seed']]=row
+        values={(known.get((case['case_id'],s),{}).get('D2'),
+                 known.get((case['case_id'],s),{}).get('N2')) for s in range(300)}
+        if len(values)!=1 or (None,None) in values:
+            failures.append(case['case_id'])
+        if case['role']=='zero_baseline' and values!={(0,0)}:
+            failures.append(case['case_id'])
+        if case['role']=='canary' and values!={(case['expected']['D2'],case['expected']['N2'])}:
+            failures.append(case['case_id'])
+    return sorted(set(failures))

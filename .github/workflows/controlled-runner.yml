@@ -1,0 +1,45 @@
+name: Controlled runner
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'
+jobs:
+  benchmark:
+    if: vars.QTB_CONTROLLED_RUNNER_ENABLED == 'true'
+    runs-on: [self-hosted, qtb-controlled]
+    timeout-minutes: 1440
+    concurrency:
+      group: qtb-controlled-runner
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -q
+      - name: Compare frozen source folders
+        id: compare
+        continue-on-error: true
+        env:
+          QTB_BASELINE_PATH: ${{ vars.QTB_BASELINE_PATH }}
+          QTB_EVOLVED_PATH: ${{ vars.QTB_EVOLVED_PATH }}
+        run: >-
+          uv run qiskit-transpile-bench compare
+          --baseline "$QTB_BASELINE_PATH" --evolved "$QTB_EVOLVED_PATH"
+          --profile confirm-profile --results-root results
+      - name: Replay archived decisions
+        if: always()
+        run: uv run python tools/replay_results.py results
+      - name: Archive evidence and source snapshots
+        if: always()
+        run: >-
+          tar -czf benchmark-results.tgz
+          --exclude='*/env' --exclude='*/cargo' --exclude='*/source'
+          --exclude='*/target' results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-evidence
+          path: benchmark-results.tgz
+          retention-days: 30
+      - if: steps.compare.outcome == 'failure'
+        run: exit 1

@@ -94,3 +94,18 @@ def test_worker_roundtrip_and_compile(tmp_path):
 def test_unknown_protocol_rejected():
     with pytest.raises(HarnessError):
         validate("job", {"protocol": "qtb-worker/9"})
+
+
+def test_worker_api_and_negative_configuration_contracts(tmp_path):
+    from qtb.canonical import read_json
+    case=next(c for c in read_json(data_root()/'fixtures/correctness-suite.json')['cases']
+              if c['input_group']=='c1_n3' and c['optimization_level']==2
+              and c['options']['initial_layout'] is None)
+    job=dict(mode='api_checks',case=case,seeds=[0],fixture_root=str(data_root()/'fixtures'),timeout_s=30)
+    row=run_worker(local_build(),job,tmp_path/'api')[0]
+    assert row['status']=='ok',row
+    assert row['first']==row['again']
+    assert row['first_layout']==row['again_layout']
+    assert row['batch_layouts']==row['individual_layouts']
+    assert row['batch_metadata']==row['input_metadata']
+    assert all(r['exception_type']=='TranspilerError' for r in row['negative_tests']),row['negative_tests']

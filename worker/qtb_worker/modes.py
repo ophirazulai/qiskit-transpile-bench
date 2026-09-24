@@ -43,7 +43,7 @@ def load_inputs(job):
 
 
 def save_output(output, input_width, path, opaque=False):
-    data = export_circuit(output, opaque=opaque)
+    data = export_circuit(output, opaque=opaque, stream=True)
     hash_ = write_circuit(path, data["header"], data["operations"])
     return {"output": str(path), "output_hash": hash_, "layout": export_layout(output, input_width)}
 
@@ -126,23 +126,60 @@ def run_seed(job, seed, outdir, inputs):
             elapsed += duration
         return {"samples_ns": samples}
     if mode == "api_checks":
+        from qiskit import QuantumCircuit
+        from qiskit.transpiler import Target
         before = digest(export_circuit(circuit))
         pm = preset(case, target, seed)
         first = pm.run(circuit)
         other = circuit.copy()
         other.x(0)
+        other.metadata = {"qtb_case": "B"}
         pm.run(other)
         again = pm.run(circuit)
         batch = pm.run([circuit, other])
+        individual = [pm.run(c) for c in (circuit, other)]
+        dynamic = QuantumCircuit(1, 1)
+        dynamic.h(0)
+        dynamic.measure(0, 0)
+        with dynamic.if_test((dynamic.clbits[0], 1)):
+            dynamic.x(0)
+        negative_tests = []
+        for name, options in (
+            ("asap_control_flow", {"scheduling_method": "asap"}),
+            ("alap_control_flow", {"scheduling_method": "alap"}),
+            ("basic_control_flow", {"routing_method": "basic"}),
+            ("lookahead_control_flow", {"routing_method": "lookahead"}),
+        ):
+            try:
+                transpile(dynamic, target=target, optimization_level=2, seed_transpiler=seed, **options)
+                error = None
+            except Exception as exc:
+                error = type(exc).__name__
+            negative_tests.append({"name": name, "exception_type": error})
+        try:
+            bare = QuantumCircuit(1)
+            bare.x(0)
+            transpile(bare, target=Target.from_configuration(["x"], 1), scheduling_method="asap")
+            error = None
+        except Exception as exc:
+            error = type(exc).__name__
+        negative_tests.append({"name": "schedule_without_durations", "exception_type": error})
         return {
             "input_before": before,
             "input_after": digest(export_circuit(circuit)),
             "first": digest(export_circuit(first, opaque=True)),
             "again": digest(export_circuit(again, opaque=True)),
             "batch_count": len(batch),
+            "negative_tests": negative_tests,
+            "first_layout": export_layout(first, circuit.num_qubits),
+            "again_layout": export_layout(again, circuit.num_qubits),
+            "batch_layouts": [export_layout(c, circuit.num_qubits) for c in batch],
+            "individual_layouts": [export_layout(c, circuit.num_qubits) for c in individual],
+            "input_metadata": [circuit.metadata, other.metadata],
+            "batch_metadata": [c.metadata for c in batch],
             "batch_hashes": [digest(export_circuit(c, opaque=True)) for c in batch],
             "individual_hashes": [
-                digest(export_circuit(pm.run(c), opaque=True)) for c in (circuit, other)
+                digest(export_circuit(c, opaque=True)) for c in individual
             ],
         }
     raise HarnessError(f"Unsupported worker mode: {mode}")

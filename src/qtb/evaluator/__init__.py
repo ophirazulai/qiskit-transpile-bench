@@ -37,6 +37,11 @@ def verdict(records, required_ids):
     # Missing improvement evidence remains inconclusive. The required set must name it.
     if not any(i.endswith("/improvement") for i in required):
         raise HarnessError("Required IDs must include an improvement record")
+    if any(
+        i.endswith("/improvement") and i in by_id and by_id[i]["kind"] != "improvement"
+        for i in required
+    ):
+        raise HarnessError("An improvement ID must contain an improvement record")
     for row in records:
         if (
             row["kind"] not in KINDS

@@ -13,11 +13,11 @@ from qtb.errors import HarnessError
 
 
 @contextmanager
-def locked(path):
+def locked(path, shared=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+        fcntl.flock(stream, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
         try:
             yield
         finally:

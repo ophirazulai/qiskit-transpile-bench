@@ -39,7 +39,11 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                         ):
                             checks.append(comparison.oracle(case, bound, "C1", reference))
                 else:
-                    extra = {}
+                    extra = (
+                        {"controlled": True}
+                        if case["oracle"] == "C1" and case["logical_qubits"] <= 2
+                        else {}
+                    )
                     if case["oracle"] == "C5":
                         extra = {
                             "start_times_dt": result.get("start_times_dt", []),
@@ -70,6 +74,10 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                         result["first"] == result["again"]
                         and result["batch_count"] == 2
                         and result["batch_hashes"] == result["individual_hashes"]
+                        and result["first_layout"] == result["again_layout"]
+                        and result["batch_layouts"] == result["individual_layouts"]
+                        and result["batch_metadata"] == result["input_metadata"]
+                        and all(r["exception_type"] == "TranspilerError" for r in result["negative_tests"])
                     )
                 )
                 statuses.append("verified" if ok else "mismatch")

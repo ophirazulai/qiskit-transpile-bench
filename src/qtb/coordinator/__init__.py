@@ -21,6 +21,7 @@ from qtb.config import STAGES, case_hash, data_root, load_profile
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.storage import (
     append_record,
+    locked,
     quality_cache_key,
     read_records,
     register_decision,
@@ -206,7 +207,8 @@ class Comparison:
             "pipeline_edits": list(edits),
             "bindings": case.get("bindings", []),
         }
-        result = run_worker(self.run["builds"][revision], job, directory, hash_seed)
+        with locked(self.root / "exclusive-cost.lock", shared=True):
+            result = run_worker(self.run["builds"][revision], job, directory, hash_seed)
         for row in result:
             row["job_file"] = str(directory / "job.json")
         return result
@@ -357,7 +359,7 @@ class Comparison:
                                 if (
                                     self.run["profile"] == "confirm-profile"
                                     and case["role"] == "scored"
-                                    and case["size_band"] == "small"
+                                    and case["logical_qubits"] <= 25
                                     and result["seed"] < 10
                                     and not observation.get("free_parameters")
                                 ):
@@ -446,6 +448,41 @@ class Comparison:
 
     def aggregate_checks(self, cases, observations):
         quality = [r for r in observations if r["seed_block"] == "B0"]
+        if self.run["profile"] == "confirm-profile":
+            eligible = {}
+            for row in quality:
+                for check in row["checks"]:
+                    if check["oracle"] != "C1-lite":
+                        continue
+                    key = row["case_id"], row["seed"]
+                    eligible.setdefault(key, {})[row["revision"]] = check
+                    if check["status"] == "mismatch":
+                        self.evidence(
+                            record(
+                                f"C1-lite/{row['id']}",
+                                "correctness",
+                                "failed",
+                                "reference" if row["revision"] == "baseline" else "evolved",
+                            )
+                        )
+            applicable = [
+                pair
+                for pair in eligible.values()
+                if pair.get("baseline", {}).get("union_width", 26) <= 25
+            ]
+            okay = bool(applicable) and all(
+                pair.get(rev, {}).get("status") == "verified"
+                for pair in applicable
+                for rev in ("baseline", "evolved")
+            )
+            self.evidence(
+                record(
+                    "CA1/C1-lite",
+                    "correctness",
+                    "passed" if okay else "unresolved",
+                    eligible_observations=len(applicable),
+                )
+            )
         expected = sum(c["seeds_per_block"] for c in cases) * 2
         self.evidence(
             record(
@@ -637,6 +674,18 @@ def evaluate_run(directory):
         read_json(directory / "evidence.json") if (directory / "evidence.json").exists() else []
     )
     records, required, summaries = evaluate_quality(manifest, policy, rows, evidence)
+    if "scope" in run:
+        from types import SimpleNamespace
+        from qtb.coordinator.calibration import cost_panels
+
+        prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
+        required = sorted(
+            set(required)
+            | {
+                f"{prefix}5/{name}"
+                for name in cost_panels(SimpleNamespace(manifest=manifest, run=run))
+            }
+        )
     decision = make_decision(run, records, required, summaries)
     if (directory / "decision.json").exists():
         decision["review"] = read_json(directory / "decision.json").get("review")

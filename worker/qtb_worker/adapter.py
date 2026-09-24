@@ -324,7 +324,7 @@ def construct_operation(desc, parameters):
     raise Unsupported(f"Unknown payload kind: {kind}")
 
 
-def export_circuit(circuit, opaque=False):
+def export_circuit(circuit, opaque=False, stream=False):
     parameters = {
         p: f"p{i}" for i, p in enumerate(sorted(circuit.parameters, key=lambda p: p.name))
     }
@@ -339,7 +339,11 @@ def export_circuit(circuit, opaque=False):
         "global_phase": encode_value(circuit.global_phase, parameters, opaque),
         "parameters": [{"id": id_, "name": p.name} for p, id_ in parameters.items()],
     }
-    operations = []
+    operations = export_operations(circuit, parameters, opaque)
+    return {"header": header, "operations": operations if stream else list(operations)}
+
+
+def export_operations(circuit, parameters, opaque=False):
     for inst in circuit.data:
         desc = operation_descriptor(inst.operation, parameters, opaque)
         qs = [circuit.find_bit(q).index for q in inst.qubits]
@@ -355,8 +359,7 @@ def export_circuit(circuit, opaque=False):
             except TypeError:
                 indices = [circuit.find_bit(bits).index]
             payload["condition"] = {"bits": indices, "value": int(value)}
-        operations.append([desc["name"], qs, cs, desc["parameters"], payload])
-    return {"header": header, "operations": operations}
+        yield [desc["name"], qs, cs, desc["parameters"], payload]
 
 
 def import_circuit(data):

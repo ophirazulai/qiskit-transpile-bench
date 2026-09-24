@@ -1,0 +1,6 @@
+qiskit==2.5.2
+numpy==2.3.3
+scipy==1.17.1
+rustworkx==0.18.1
+sympy==1.14.0
+mpmath==1.3.0

@@ -157,3 +157,10 @@ def test_dynamic_branch_and_reset_mutations():
     assert verify_dynamic(a, b)["status"] == "verified"
     b.x(1)
     assert verify_dynamic(a, b)["status"] == "mismatch"
+
+
+def test_coherent_control_exposes_global_phase_error():
+    a=QuantumCircuit(1);a.h(0)
+    b=a.copy();b.global_phase=.2
+    assert verify_unitary(a,b,None)['status']=='verified'
+    assert verify_unitary(a,b,None,controlled=True)['status']=='mismatch'

@@ -29,7 +29,13 @@ def main():
     try:
         reference, output = load(job["reference"]), load(job["output"])
         if job["oracle"] == "C1":
-            result = verify_unitary(reference, output, job["layout"], job["input_domain"])
+            result = verify_unitary(
+                reference,
+                output,
+                job["layout"],
+                job["input_domain"],
+                controlled=job.get("controlled", False),
+            )
         elif job["oracle"] == "C7":
             result = verify_clifford(
                 reference, output, job["layout"], job.get("covers"), job.get("substituted", [])

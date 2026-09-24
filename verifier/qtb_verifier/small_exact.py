@@ -34,13 +34,19 @@ def phase_equal(a, b, rtol=1e-7, atol=1e-8):
     return np.allclose(a * overlap / abs(overlap), b, rtol=rtol, atol=atol)
 
 
-def verify_unitary(logical, output, layout, contract="all_inputs", max_qubits=10):
+def verify_unitary(logical, output, layout, contract="all_inputs", max_qubits=10, controlled=False):
     if contract != "all_inputs":
         return {"status": "unverified", "detail": "All-input compile contract required"}
     if output.num_qubits > max_qubits:
         return {"status": "unverified", "detail": "Dense operator width limit"}
     expected = expected_circuit(logical, output.num_qubits, layout)
     a, b = Operator(expected).data, Operator(output).data
+    if controlled:
+        controlled_a = np.eye(2 * a.shape[0], dtype=complex)
+        controlled_b = controlled_a.copy()
+        controlled_a[1::2, 1::2] = a
+        controlled_b[1::2, 1::2] = b
+        a, b = controlled_a, controlled_b
     ok = phase_equal(a, b)
     dimension = a.shape[0]
     infidelity = max(0.0, 1 - abs(np.vdot(a.ravel(), b.ravel())) ** 2 / dimension**2)

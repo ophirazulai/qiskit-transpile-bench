@@ -1,7 +1,6 @@
 """Public command-line entry point and stable exit statuses."""
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -97,10 +96,10 @@ def main(argv=None):
             observation = next((r for r in rows if r["id"] == args.observation_id), None)
             if observation is None:
                 raise HarnessError("Observation not found in this run")
-            args.out.mkdir(parents=True, exist_ok=False)
-            shutil.copy2(observation["worker"]["job_file"], args.out / "job.json")
-            write_json(args.out / "observation.json", observation)
-            print(f"Reproduction job: {args.out / 'job.json'}")
+            from qtb.config import data_root
+            from qtb.repro import export_reproducer
+            export_reproducer(observation, args.run, args.out, data_root()/"envs")
+            print(f"Reproducer: {args.out / 'run.py'}")
             return 0
         raise HarnessError("Unknown command")
     except (HarnessError, OSError, ValueError, KeyError) as exc:
