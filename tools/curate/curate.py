@@ -447,14 +447,6 @@ def curate(source, root=ROOT):
         directory.mkdir(parents=True, exist_ok=True)
         write_json(directory / "manifest.json", manifest)
         write_json(directory / "policy.json", policy(profile))
-        write_json(
-            directory / "exclusions.json",
-            {
-                "output_pinned_tests": [],
-                "status": "unreviewed",
-                "reason": "Requires reshuffled-baseline run and human review",
-            },
-        )
     write_json(fixtures / "provenance.json", provenance)
     shutil.copy2(source / "LICENSE.txt", fixtures / "LICENSE-QISKIT.txt")
     lines = [

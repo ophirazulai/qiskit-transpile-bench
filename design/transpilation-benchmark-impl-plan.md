@@ -1,5 +1,9 @@
 # Standalone Qiskit transpilation benchmark: implementation plan
 
+This is an archived proposal. Its descriptions of standalone maintenance, replay,
+reproduction, and review commands do not describe the current CLI. See the root README
+for the supported `smoke` and `compare` commands.
+
 This plan specifies how to build a dedicated repository (working name
 `qiskit-transpile-bench`, Python package `qtb`) that depends on Qiskit and answers one
 question:

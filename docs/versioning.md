@@ -7,7 +7,7 @@ typed payloads, parameter trees, register order, and phase. Target hashes preser
 instruction insertion order. Gzip timestamps do not affect canonical identity.
 
 A fixture, semantic reference, role, seed block, canary constant, weight, constraint,
-exclusion list, or threshold change requires a new profile version and fresh qualification.
+or threshold change requires a new profile version and fresh qualification.
 Do not edit a frozen profile to accept a candidate. Recuration is an explicit maintenance
 operation using `tools/curate/curate.py`; comparisons consume only frozen artifacts.
 The original RevLib/HWB claims do not transfer to their declared generated replacements.
@@ -26,16 +26,8 @@ state representations. A successful build alone does not establish compatibility
 another Qiskit revision: input round trips, all applicable correctness checks, and the
 controlled-runner qualification remain required. No broad future-version guarantee is made.
 
-Historical evaluation checks archived manifest/policy and coordinator identities and
-recomputes from saved quality records and original cost bundles/calibration. It preserves
-measurement timestamps and human review. Use the archived harness wheel to replay an older
-coordinator. Format migrations must write a new artifact, retain the original, record both
-hashes and the migration code, and repeat the known-outcome tests. There is no automatic
-migration that silently reinterprets an old decision.
-
-`derive-exclusions RUN` executes baseline-owned tests twice in the baseline environment,
-with the second run offsetting explicit SABRE seeds by the frozen constant 1,000,003.
-It archives test node IDs, outcomes, failure text and the runner hash. Review the proposed
-new failures for exact heuristic-output assertions, remove semantic failures, and freeze
-the reviewed list with its `baseline_build` in the versioned profile. A proposal never
-satisfies the upstream requirement by itself.
+Comparison writes its decision and report from the measured quality records and cost
+bundles. An interrupted comparison can resume with its archived manifest, policy, and
+matching coordinator version. Format migrations must write a new artifact, retain the
+original, record both hashes and the migration code, and repeat the known-outcome tests.
+There is no automatic migration that silently reinterprets an old decision.

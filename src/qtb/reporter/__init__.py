@@ -1,13 +1,9 @@
-"""Replayable decision artifacts and human review, without any Qiskit import."""
+"""Decision and report artifacts, without any Qiskit import."""
 
-import copy
-from datetime import UTC, datetime
 from pathlib import Path
 
-from qtb.canonical import atomic_bytes, digest, read_json, write_json
+from qtb.canonical import atomic_bytes, write_json
 from qtb.config import validate
-from qtb.coordinator.storage import append_record
-from qtb.errors import HarnessError
 from qtb.evaluator import verdict
 
 
@@ -35,7 +31,6 @@ def make_decision(run, records, required_ids, summaries, observations=()):
         "required_ids": sorted(required_ids),
         "summaries": summaries,
         "scope": run.get("scope", {}),
-        "review": None,
         "measurement_timestamp": run.get("created_at"),
         "calibration": run.get("calibrations", {}).get("false_rejection"),
         "fingerprint_changes": {
@@ -145,11 +140,6 @@ def render_report(decision):
         __import__("json").dumps(decision.get("scope", {}), indent=2),
         "```",
         "",
-        "## Reproduction",
-        "",
-        "`qiskit-transpile-bench evaluate <run-directory>` replays saved evidence.",
-        "`qiskit-transpile-bench repro <observation-id> --run <run-directory>` exports its job.",
-        "",
     ]
     for gap in decision.get("coverage_gaps", []):
         lines.append(f"- Declared workload gap: {gap}")
@@ -162,13 +152,6 @@ def render_report(decision):
             "unavailable budget fields remain `unknown`.",
             "",
         ]
-    if decision.get("review"):
-        lines += [
-            "## Human review",
-            "",
-            f"{decision['review']['outcome']}: {decision['review']['rationale']}",
-            "",
-        ]
     return "\n".join(lines)
 
 
@@ -176,32 +159,3 @@ def write_report(directory, decision):
     directory = Path(directory)
     write_json(directory / "decision.json", decision)
     atomic_bytes(directory / "report.md", render_report(decision).encode())
-
-
-def review_decision(path, reviewer, rationale, outcome):
-    path = Path(path)
-    decision = read_json(path)
-    forbidden = [
-        r
-        for r in decision["constraints"]
-        if r["result"] == "failed" and r["kind"] not in {"guard", "cost", "improvement"}
-    ]
-    if forbidden or decision["status"] not in {"INCONCLUSIVE", "CONSTRAINT_VIOLATION"}:
-        raise HarnessError("Only inconclusive decisions and quality/cost trades are reviewable")
-    if not reviewer.strip() or not rationale.strip():
-        raise HarnessError("Review requires a reviewer and substantive rationale")
-    if outcome not in {"reviewed_accept", "reviewed_reject"}:
-        raise HarnessError("Unknown review outcome")
-    entry = {
-        "decision_hash": digest(decision),
-        "reviewer": reviewer,
-        "rationale": rationale,
-        "outcome": outcome,
-        "created_at": datetime.now(UTC).isoformat(),
-        "constraints_examined": [r["id"] for r in decision["constraints"]],
-    }
-    append_record(path.parent / "reviews.jsonl", entry)
-    updated = copy.deepcopy(decision)
-    updated["review"] = entry
-    write_report(path.parent, updated)
-    return entry

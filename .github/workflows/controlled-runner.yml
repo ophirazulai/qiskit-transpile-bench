@@ -26,9 +26,6 @@ jobs:
           uv run qiskit-transpile-bench compare
           --baseline "$QTB_BASELINE_PATH" --evolved "$QTB_EVOLVED_PATH"
           --profile confirm-profile --results-root results
-      - name: Replay archived decisions
-        if: always()
-        run: uv run python tools/replay_results.py results
       - name: Archive evidence and source snapshots
         if: always()
         run: >-

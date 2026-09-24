@@ -1,37 +1,22 @@
-"""Baseline-owned Python tests, seed-reshuffle derivation, and inline Rust tests."""
+"""Baseline-owned Python tests and inline Rust tests."""
 
 import shutil
 import subprocess
 from pathlib import Path
 
-from qtb.canonical import digest, read_json, write_json
+from qtb.canonical import write_json
 from qtb.coordinator.storage import read_records
 from qtb.envbuild import run_logged, sanitized_environment
 from qtb.errors import HarnessError
 from qtb.evaluator import record
 
-SEED_OFFSET = 1_000_003
-RUNNER = """import functools
-import inspect
-import json
+RUNNER = """import json
 import sys
 from pathlib import Path
 
-root, output, offset = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+root, output = Path(sys.argv[1]), Path(sys.argv[2])
 sys.path.insert(0, str(root))
 import pytest
-if offset:
-    from qiskit.transpiler.passes import SabreLayout, SabreSwap
-    for cls in (SabreLayout, SabreSwap):
-        original = cls.__init__
-        signature = inspect.signature(original)
-        def wrapped(self, *args, _original=original, _signature=signature, **kwargs):
-            bound = _signature.bind(self, *args, **kwargs)
-            seed = bound.arguments.get("seed")
-            if seed is not None:
-                bound.arguments["seed"] = (int(seed) + offset) % (2**32)
-            return _original(*bound.args, **bound.kwargs)
-        cls.__init__ = functools.wraps(original)(wrapped)
 
 class Recorder:
     def pytest_runtest_logreport(self, report):
@@ -40,7 +25,7 @@ class Recorder:
         with output.open("a") as stream:
             stream.write(json.dumps(row) + "\\n")
 
-raise SystemExit(pytest.main(sys.argv[4:], plugins=[Recorder()]))
+raise SystemExit(pytest.main(sys.argv[3:], plugins=[Recorder()]))
 """
 
 
@@ -58,7 +43,7 @@ def prepare_tests(snapshot, directory):
     return runner
 
 
-def python_suite(build, snapshot, directory, locks, exclusions=(), offset=0):
+def python_suite(build, snapshot, directory, locks):
     directory = Path(directory)
     runner = prepare_tests(snapshot, directory)
     results, log = directory / "tests.jsonl", directory / "tests.log"
@@ -80,11 +65,9 @@ def python_suite(build, snapshot, directory, locks, exclusions=(), offset=0):
                     runner,
                     directory,
                     results,
-                    str(offset),
                     "test/python/transpiler",
                     "test/python/compiler",
                     "-q",
-                    *[f"--deselect={node}" for node in exclusions],
                 ],
                 cwd=directory,
                 env=env,
@@ -107,35 +90,7 @@ def python_suite(build, snapshot, directory, locks, exclusions=(), offset=0):
         "passed": sorted(
             {r["nodeid"] for r in rows if r["when"] == "call" and r["outcome"] == "passed"}
         ),
-        "seed_offset": offset,
     }
-
-
-def derive_exclusions(run_directory, locks):
-    """Propose node IDs from a neutral seed offset; never approve them automatically."""
-    directory = Path(run_directory).resolve()
-    run = read_json(directory / "run.json")
-    build = run["builds"]["baseline"]
-    root = directory / "exclusion-derivation"
-    ordinary = python_suite(build, build["snapshot"]["path"], root / "ordinary", locks)
-    shuffled = python_suite(
-        build, build["snapshot"]["path"], root / "reshuffled", locks, offset=SEED_OFFSET
-    )
-    proposal = {
-        "format": "qtb-exclusions/1",
-        "status": "unreviewed",
-        "baseline_build": build["id"],
-        "runner_hash": digest(RUNNER),
-        "seed_offset": SEED_OFFSET,
-        "ordinary": ordinary,
-        "reshuffled": shuffled,
-        "output_pinned_tests": sorted(set(shuffled["failed"]) & set(ordinary["passed"])),
-        "preexisting_failures": ordinary["failed"],
-        "review_instruction": "Inspect every proposed failure for an exact heuristic-output "
-        "assertion; remove semantic failures before freezing the list.",
-    }
-    write_json(root / "exclusions.proposed.json", proposal)
-    return proposal
 
 
 def rust_suite(build, directory):
@@ -165,30 +120,15 @@ def rust_suite(build, directory):
 
 
 def upstream_checks(comparison):
-    exclusions = read_json(
-        comparison.data / "profiles" / comparison.run["profile"] / "exclusions.json"
-    )
     changed = comparison.run.get("changed_paths", [])
     write_json(
         comparison.directory / "changed-tests.json",
         {
             "python_test_files": [p for p in changed if p.startswith("test/")],
             "possible_inline_test_regions": [p for p in changed if p.endswith(".rs")],
-            "output_pinned_exclusions": exclusions,
         },
     )
     baseline = comparison.run["builds"]["baseline"]
-    if exclusions.get("status") != "reviewed" or exclusions.get("baseline_build") != baseline["id"]:
-        comparison.evidence(
-            record(
-                f"{comparison.prefix}1/upstream",
-                "correctness",
-                "unresolved",
-                detail="Output-pinned exclusions require a reviewed derivation for this baseline "
-                "build; run derive-exclusions on the archived run",
-            )
-        )
-        return
     results = {}
     for revision, subject in (("baseline", "reference"), ("evolved", "evolved")):
         build = comparison.run["builds"][revision]
@@ -197,7 +137,6 @@ def upstream_checks(comparison):
             baseline["snapshot"]["path"],
             comparison.directory / f"upstream-{revision}",
             comparison.data / "envs",
-            exclusions["output_pinned_tests"],
         )
         results[revision] = result
         status = result["result"]

@@ -22,7 +22,7 @@ channel, locked dependencies, sanitized environment variables, and native-extens
 validation, not a claim that a controlled runner has qualified them. Automatic `PASS`
 requires all correctness, baseline, calibration, coverage, and qualification records.
 Missing or unverified required evidence prevents `PASS`. In particular, the baseline's
-output-pinned upstream-test exclusions need the reviewed derivation described in the plan.
+upstream Python and Rust tests must pass the comparison's correctness checks.
 See [qualification and implementation status](docs/implementation-status.md).
 
 The iterations profile contains three scored 100-qubit cases, six basis guards, three
@@ -37,27 +37,22 @@ Every quality panel uses seeds 0–99. Calibration uses the separate baseline bl
 protocol, machine, harness, and worker environment. Cost samples belong to a single
 run/session/arm bundle and are never reused for a different comparison.
 
-```bash
-uv run qiskit-transpile-bench calibrate --baseline /path/to/baseline
-uv run qiskit-transpile-bench derive-exclusions results/runs/RUN
-uv run qiskit-transpile-bench evaluate results/runs/RUN
-uv run qiskit-transpile-bench report results/runs/RUN
-uv run qiskit-transpile-bench repro OBSERVATION_ID --run results/runs/RUN --out repro-job
-uv run qiskit-transpile-bench review --decision results/runs/RUN/decision.json \
-  --reviewer 'Reviewer Name' --rationale rationale.md --outcome reviewed_reject
-```
+Run `compare` above to create `results/runs/RUN/decision.json` and the readable
+`results/runs/RUN/report.md`. `smoke` checks that both revisions can be built and
+run, but does not produce a verdict. `compare` performs its own baseline
+calibration and correctness checks. `uv run` runs the installed CLI in the
+project's uv environment; replace the example paths with your Qiskit source trees.
 
 `--results-root` selects the evidence directory. `--resume RUN_DIRECTORY` resumes an
 interrupted comparison against its archived snapshots and original manifest/policy. Resume
-and replay use the same coordinator version; install the archived harness wheel when
-inspecting an older run.
+requires the same coordinator version; install the archived harness wheel when
+resuming an older run.
 `--change-scope scope.json` accepts `{"stages":["optimization"]}` and can only widen the
 scope inferred from changed source files. Unknown paths mean all stages.
 
 Verdict exit codes are `PASS=0`, `NO_IMPROVEMENT=10`, `CONSTRAINT_VIOLATION=20`,
-`INCONCLUSIVE=30`, `ERROR=40`; usage errors are 64. Utilities return 0 or 40.
-Smoke writes `smoke.json` and never creates a decision. Human review is recorded separately
-and never changes a verdict to `PASS` or changes the reference revision.
+`INCONCLUSIVE=30`, `ERROR=40`; usage errors are 64. Smoke returns 0 or 40 and
+writes `smoke.json` without creating a decision.
 
 ```bash
 uv run pytest
@@ -69,4 +64,4 @@ The profile is the scope of the claim. Iterate with iterations-profile, then use
 as a check. Repeated tuning on confirm invalidates its intended role. Reports retain the
 per-manifest decision count and the confirm score with the iteration inputs removed.
 
-See [format and compatibility rules](docs/versioning.md) for profile changes and archival replay.
+See [format and compatibility rules](docs/versioning.md) for profile changes and archival runs.

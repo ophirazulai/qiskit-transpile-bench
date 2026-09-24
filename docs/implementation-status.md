@@ -1,6 +1,7 @@
 # Implementation and qualification
 
-The implementation follows `design/transpilation-benchmark-impl-plan.md`. Both profiles
+The implementation originated from `design/transpilation-benchmark-impl-plan.md`; the
+README describes the current CLI. Both profiles
 are version 1 and deliberately marked unqualified. A successful smoke test is not benchmark
 qualification. Numerical examples and synthetic acceptance-path tests are harness tests,
 not measurements of an evolved Qiskit revision.
@@ -20,22 +21,22 @@ not measurements of an evolved Qiskit revision.
   separately calibrated doubled-count reruns, calibration expiry, archived bundles, and
   combined quality/cost false-rejection calibration.
 - Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable run
-  evidence, wheel and quality caches, determinism audits, report replay from raw quality/cost
-  observations, and reproducers using archived wheels and dependency locks.
+  evidence, wheel and quality caches, determinism audits, and reports generated from
+  quality and cost observations.
 - Trusted dense, statevector, terminal-measurement, dynamic-branching, Clifford, and schedule
   oracles; a frozen 480-configuration C1–C5 fixture suite; coherent-control phase checks;
   worker API contracts and negative configuration checks.
 - Curated iterations and confirm workloads, frozen semantic references for Trotter inputs,
   Clifford variants, explicit license/provenance records, and reproducible curation tools.
 - All-300-seed baseline role audits, C1-lite eligibility based on the reference/output union,
-  upstream seed-reshuffle exclusion proposals, and binding baseline-owned test execution.
+  and binding baseline-owned test execution.
 - One-pass structural metrics/hash/legality, successful-output pruning above 8 MB,
   runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
 
 ## Implementation validation (2026-09-24)
 
-- All 80 automated tests pass; repository-wide Ruff and whitespace checks pass.
+- All 86 automated tests pass; repository-wide Ruff and whitespace checks pass.
 - A native smoke run built two isolated release wheels from local Qiskit revision
   `c062c2dfd240b23157fbfcf6184e8998a9c8b343` (2.6.0.dev0) and completed all 24 quality
   observations: 12 iteration cases in each build. Smoke does not produce a benchmark verdict.
@@ -47,8 +48,7 @@ not measurements of an evolved Qiskit revision.
 - The eligible `ripple_adder_10` C1-lite check verified on a 23-qubit union. End-to-end timing,
   reused-pass-manager timing, preset construction, and memory worker modes completed.
 - The zero-initialized `multiplier_h18_n16` positive control verified at level 0, seed 0
-  on Mumbai using a 16-qubit union. An archived single-observation reproducer also
-  recompiled a real 100-qubit Heisenberg case and matched its recorded output hash.
+  on Mumbai using a 16-qubit union.
 - The built wheel includes all 271 confirm cases, and its coordinator imports without Qiskit.
 
 Local evidence is under `results/validation/summary.json`, `results/smoke-validation/`,
@@ -61,10 +61,8 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
    all cost calibrations, and the known-outcome mutations on the intended runner. Review
    every proposed deterministic/canary role against the measured baseline; draft probe facts
    are not sufficient. The replacement reversible circuits require fresh measurements.
-2. Derive output-pinned upstream exclusions against a seed-reshuffled baseline, then review
-   and freeze the node IDs in the profile's `exclusions.json`. Until it is reviewed, the
-   upstream requirement stays unresolved. New binding Python failures and executed Rust
-   test failures must be investigated independently of score changes.
+2. Investigate binding upstream Python and Rust test failures independently of score changes.
+   The comparison runs these tests directly, without an exclusion list.
 3. Qualify the corrected C1-lite measurement oracle on the output/reference union, including
    the larger eligible `ripple_adder_10` case, and inspect the actual coverage and runtime.
 4. Inspect a complete real comparison and create a qualification record under
@@ -85,12 +83,10 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
 - Quality orchestration is serial, with quality and routing prefixes batched by seed.
   Runtime and memory budgets still need measurement on the intended controlled runner.
 - Automatic pruning keeps failing and inconclusive runs intact for investigation. Successful
-  large outputs are pruned with a hash/observation retention record; reproducers recompile
-  their recorded seed from the archived wheels and fixtures, including after a run archive
-  is moved or a cached quality job's original run is removed. Pinned dependency downloads
-  are required when they are absent from the local package cache.
-- The upstream exclusion command produces proposals, not approved exclusions. The candidate's
-  own Python tests are report-only, while the baseline's tests bind the comparison.
+  large outputs are pruned with a hash/observation retention record. Pinned dependency
+  downloads are required when they are absent from the local package cache.
+- The candidate's own Python tests are report-only, while the baseline's tests bind the
+  comparison.
 - CI currently verifies the adapter on Qiskit 2.5.2. The trusted verifier stays pinned to that
   version. Additional source revisions must complete round trips and the correctness suite
   before they can participate in a qualified comparison.
