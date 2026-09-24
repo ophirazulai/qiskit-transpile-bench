@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qiskit-transpile-bench"
+version = "0.1.0"
+description = "Benchmark harness that decides whether an evolved Qiskit revision improves transpilation over a baseline."
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "qiskit>=2.5",
+]
+
+# Uncomment once src/qtb/cli.py exists.
+# [project.scripts]
+# qiskit-transpile-bench = "qtb.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qtb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["design"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
