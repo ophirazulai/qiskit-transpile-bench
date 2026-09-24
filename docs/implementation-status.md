@@ -2,7 +2,7 @@
 
 The implementation originated from `design/transpilation-benchmark-impl-plan.md`; the
 README describes the current CLI. Both profiles
-are version 1 and deliberately marked unqualified. A successful smoke test is not benchmark
+are version 2 and deliberately marked unqualified. A successful smoke test is not benchmark
 qualification. Numerical examples and synthetic acceptance-path tests are harness tests,
 not measurements of an evolved Qiskit revision.
 
@@ -61,6 +61,10 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
    all cost calibrations, and the known-outcome mutations on the intended runner. Review
    every proposed deterministic/canary role against the measured baseline; draft probe facts
    are not sufficient. The replacement reversible circuits require fresh measurements.
+   Before qualification, use `tools/freeze_timeouts.py measure` against the baseline build
+   and `freeze` to draft version-bumped manifests. The tool requires measured compiles for
+   every case and seed, including `multiplier_h18_n20`; the shipped version-2 profiles
+   still carry provisional 120-second timeouts.
 2. Investigate binding upstream Python and Rust test failures independently of score changes.
    The comparison runs these tests directly, without an exclusion list.
 3. Qualify the corrected C1-lite measurement oracle on the output/reference union, including

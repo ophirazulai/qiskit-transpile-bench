@@ -5,6 +5,12 @@ from qtb.errors import HarnessError
 
 DIRECTIVES = {"barrier"}
 CONTROL_FLOW = {"if_else", "for_loop", "while_loop", "switch_case"}
+LOOSE_IMPLICIT = {
+    "measure": (1, 1, []),
+    "reset": (1, 0, []),
+    "delay": (1, 0, ["duration"]),
+    **{name: (None, None, []) for name in CONTROL_FLOW},
+}
 
 
 def d2_n2(operations, native_2q_names):
@@ -52,7 +58,7 @@ def layout_errors(layout, n_in, n_out, requested=None):
 class StructuralChecker:
     """Consume each operation once while keeping O(wires + target) state."""
 
-    def __init__(self, header, target):
+    def __init__(self, header, target, constraint_form="target"):
         self.header, self.target = header, target
         self.levels, self.n2, self.errors = {}, 0, []
         self.active_qubits = set()
@@ -61,6 +67,15 @@ class StructuralChecker:
             i["name"]: (i, None if i["qargs"] is None else {tuple(q) for q in i["qargs"]})
             for i in target["instructions"]
         }
+        self.implied_loose = set()
+        if constraint_form == "loose":
+            for name, (arity, _clbits, parameters) in LOOSE_IMPLICIT.items():
+                if name not in self.support:
+                    self.support[name] = (
+                        {"name": name, "arity": arity, "parameters": parameters},
+                        None,
+                    )
+                    self.implied_loose.add(name)
         if header["num_qubits"] != target["num_qubits"]:
             self.errors.append("Output width differs from target width")
 
@@ -90,6 +105,10 @@ class StructuralChecker:
                 spec, allowed = entry
                 if spec["arity"] is not None and len(qs) != spec["arity"]:
                     self.errors.append(f"Wrong arity: {name}")
+                if name in self.implied_loose:
+                    expected_clbits = LOOSE_IMPLICIT[name][1]
+                    if expected_clbits is not None and len(cs) != expected_clbits:
+                        self.errors.append(f"Wrong classical arity: {name}")
                 if allowed is not None and tuple(qs) not in allowed:
                     self.errors.append(f"Illegal ordered qubits: {name}{qs}")
                 if name not in CONTROL_FLOW and len(params) != len(spec.get("parameters", [])):

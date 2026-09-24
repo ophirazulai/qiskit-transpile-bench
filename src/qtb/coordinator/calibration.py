@@ -2,13 +2,22 @@
 
 import math
 from datetime import UTC, datetime, timedelta
+from importlib.util import find_spec
+from pathlib import Path
 
-from qtb.canonical import digest, read_json, write_json
+from qtb.canonical import digest, file_hash, read_json, write_json
+from qtb.config import STAGES
 from qtb.coordinator.costs import calibrate_panel, measure_panel
 from qtb.coordinator.storage import read_records
 from qtb.errors import Incomplete
 from qtb.evaluator import evaluate_quality, record
 from qtb.evaluator.statistics import sign_flip_calibration
+
+
+class CalibrationIncomplete(Incomplete):
+    def __init__(self, phase, detail):
+        super().__init__(detail)
+        self.phase = phase
 
 
 def cost_panels(comparison, all_panels=False):
@@ -47,12 +56,64 @@ def cost_panels(comparison, all_panels=False):
     return panels
 
 
+def required_cost_panels(comparison):
+    """The preset panel is measured always, but guarded for relevant or unknown scope."""
+    panels = cost_panels(comparison)
+    scope = comparison.run["scope"].values()
+    preset_scope = any(
+        set(value["stages"]) == set(STAGES) or value.get("unmapped_paths") for value in scope
+    )
+    changed_paths = (
+        path.lower().replace("\\", "/") for path in comparison.run.get("changed_paths", [])
+    )
+    preset_paths = any(
+        "preset_passmanager" in path or "/target" in path for path in changed_paths
+    )
+    if not preset_scope and not preset_paths:
+        panels.pop("preset", None)
+    return panels
+
+
+def calibration_implementation_identity():
+    """Fingerprint code that can change baseline calibration observations or rules.
+
+    The full harness wheel also contains CLI, reporting and replay code. Changes
+    there cannot alter these measurements and should not discard calibration.
+    """
+    qtb_root = Path(__file__).resolve().parents[1]
+    sources = {"qtb/errors.py": qtb_root / "errors.py"}
+    for package in ("canonical", "config", "metrics", "evaluator", "envbuild"):
+        for path in (qtb_root / package).rglob("*.py"):
+            sources[f"qtb/{path.relative_to(qtb_root)}"] = path
+    for path in (qtb_root / "config/schemas").glob("*.json"):
+        sources[f"qtb/{path.relative_to(qtb_root)}"] = path
+    for name in (
+        "__init__.py",
+        "calibration.py",
+        "costs.py",
+        "process.py",
+        "storage.py",
+        "checks.py",
+    ):
+        sources[f"qtb/coordinator/{name}"] = qtb_root / "coordinator" / name
+    for package in ("qtb_worker", "qtb_verifier"):
+        spec = find_spec(package)
+        if spec is None or not spec.submodule_search_locations:
+            raise Incomplete(f"Missing calibration implementation package: {package}")
+        root = Path(next(iter(spec.submodule_search_locations)))
+        for path in root.rglob("*.py"):
+            sources[f"{package}/{path.relative_to(root)}"] = path
+    return digest({name: file_hash(path) for name, path in sorted(sources.items())})
+
+
 def calibration_key(comparison):
     return digest(
         {
             "baseline": comparison.run["builds"]["baseline"]["id"],
-            "hashes": comparison.run["hashes"],
+            "manifest": comparison.run["hashes"]["manifest"],
+            "policy": comparison.run["hashes"]["policy"],
             "machine": comparison.run["machine"],
+            "implementation": calibration_implementation_identity(),
         }
     )
 
@@ -140,22 +201,27 @@ def preflight(comparison, cases, force=False):
         days=30
     ):
         summary = None
-    if summary is None:
+    created = summary is None
+    if created:
         directory.mkdir(parents=True, exist_ok=True)
-        for block in ("B0", "KB1", "KB2"):
-            comparison.quality(cases, block=block, revisions=("baseline",))
-        comparison.audit(
-            cases,
-            read_records(comparison.directory / "observations.jsonl"),
-            revisions=("baseline",),
-        )
-        if not any(
-            r["id"] == "audit/determinism" and r["result"] == "passed" for r in comparison.records
-        ):
-            raise Incomplete("Baseline determinism audit failed before calibration")
-        quality = calibrate_quality(comparison, cases)
-        quality["role_failures"] = freeze_roles(comparison, cases)
-        quality["freeze_allowed"] &= not quality["role_failures"]
+        try:
+            for block in ("B0", "KB1", "KB2"):
+                comparison.quality(cases, block=block, revisions=("baseline",))
+            comparison.audit(
+                cases,
+                read_records(comparison.directory / "observations.jsonl"),
+                revisions=("baseline",),
+            )
+            if not any(
+                r["id"] == "audit/determinism" and r["result"] == "passed"
+                for r in comparison.records
+            ):
+                raise Incomplete("Baseline determinism audit failed before calibration")
+            quality = calibrate_quality(comparison, cases)
+            quality["role_failures"] = freeze_roles(comparison, cases)
+            quality["freeze_allowed"] &= not quality["role_failures"]
+        except Incomplete as exc:
+            raise CalibrationIncomplete("quality", str(exc)) from exc
         if quality["role_failures"]:
             comparison.evidence(
                 record(
@@ -170,14 +236,18 @@ def preflight(comparison, cases, force=False):
         cost = {}
         for name, (panel, estimator) in cost_panels(comparison, all_panels=True).items():
             comparison.progress(f"Calibrating {name}: two independent baseline builds.")
-            cost[name] = calibrate_panel(
-                comparison.run,
-                comparison.run["builds"],
-                panel,
-                estimator,
-                directory / name,
-                comparison.fixtures,
-            )
+            try:
+                cost[name] = calibrate_panel(
+                    comparison.run,
+                    comparison.run["builds"],
+                    panel,
+                    estimator,
+                    directory / name,
+                    comparison.fixtures,
+                    comparison.policy["measurement_protocol"],
+                )
+            except Incomplete as exc:
+                raise CalibrationIncomplete("cost", f"{name}: {exc}") from exc
         summary = {
             "id": key,
             "created_at": datetime.now(UTC).isoformat(),
@@ -186,21 +256,24 @@ def preflight(comparison, cases, force=False):
             "hashes": comparison.run["hashes"],
             "machine": comparison.run["machine"],
         }
-        rejections = [c["null_rejections"] for c in cost.values()]
-        cost_rate = (
-            sum(any(row) for row in zip(*rejections, strict=True)) / len(rejections[0])
-            if rejections
-            else 0.0
-        )
-        combined = 1 - (1 - quality["false_rejection_rate"]) * (1 - cost_rate)
-        summary["false_rejection"] = {
-            "quality": quality["false_rejection_rate"],
-            "cost": cost_rate,
-            "combined": combined,
-            "freeze_allowed": combined <= 0.1,
-            "noisy_guard_count": quality["noisy_guard_count"] + len(cost),
-            "method": "1 - (1 - p_quality) * (1 - p_cost); independent quality and cost sessions",
-        }
+    guarded = required_cost_panels(comparison)
+    rejections = [summary["cost"][name]["null_rejections"] for name in guarded]
+    cost_rate = (
+        sum(any(row) for row in zip(*rejections, strict=True)) / len(rejections[0])
+        if rejections
+        else 0.0
+    )
+    quality_rate = summary["quality"]["false_rejection_rate"]
+    combined = 1 - (1 - quality_rate) * (1 - cost_rate)
+    summary["false_rejection"] = {
+        "quality": quality_rate,
+        "cost": cost_rate,
+        "combined": combined,
+        "freeze_allowed": combined <= 0.1,
+        "noisy_guard_count": summary["quality"]["noisy_guard_count"] + len(guarded),
+        "method": "1 - (1 - p_quality) * (1 - p_cost); independent quality and cost sessions",
+    }
+    if created:
         write_json(summary_path, summary)
     comparison.run["calibrations"] = summary
     comparison.save()
@@ -229,7 +302,7 @@ def preflight(comparison, cases, force=False):
             "calibration/cost",
             "completeness",
             "passed"
-            if all(c["freeze_allowed"] for c in summary["cost"].values())
+            if all(summary["cost"][name]["freeze_allowed"] for name in guarded)
             else "unresolved",
         )
     )
@@ -240,23 +313,43 @@ def measure_costs(comparison):
     calibration = comparison.run.get("calibrations")
     if calibration is None:
         raise Incomplete("No valid calibration for this run")
+    guarded = required_cost_panels(comparison)
     for name, (cases, estimator) in cost_panels(comparison).items():
         comparison.progress(f"Measuring {name}: fresh interleaved baseline/control/evolved arms.")
-        result = measure_panel(
-            comparison.run,
-            comparison.run["builds"],
-            cases,
-            estimator,
-            comparison.directory / "cost" / name,
-            comparison.fixtures,
-            calibration["cost"][name],
-        )
+        try:
+            result = measure_panel(
+                comparison.run,
+                comparison.run["builds"],
+                cases,
+                estimator,
+                comparison.directory / "cost" / name,
+                comparison.fixtures,
+                calibration["cost"][name],
+                comparison.policy["measurement_protocol"],
+                guarded=name in guarded,
+            )
+        except Incomplete as exc:
+            if name in guarded:
+                raise
+            comparison.evidence(
+                record(
+                    f"{comparison.prefix}5/{name}",
+                    "cost",
+                    "not_evaluated",
+                    observed_result="unresolved",
+                    detail=str(exc),
+                )
+            )
+            continue
+        details = {k: v for k, v in result.items() if k != "result"}
+        if name not in guarded:
+            details["observed_result"] = result["result"]
         comparison.evidence(
             record(
                 f"{comparison.prefix}5/{name}",
                 "cost",
-                result["result"],
-                **{k: v for k, v in result.items() if k != "result"},
+                result["result"] if name in guarded else "not_evaluated",
+                **details,
             )
         )
 
@@ -279,13 +372,20 @@ def freeze_roles(comparison, cases):
             continue
         target = read_json(comparison.fixtures / case["target"]["file"])
         missing = [seed for seed in range(300) if (case["case_id"], seed) not in known]
-        for start in range(0, len(missing), 25):
-            for result in comparison.job("baseline", case, "quality", missing[start : start + 25]):
+        batch_size = comparison.policy["measurement_protocol"]["quality_batch_size"]
+        for start in range(0, len(missing), batch_size):
+            for result in comparison.job(
+                "baseline", case, "quality", missing[start : start + batch_size]
+            ):
                 row = {"case_id": case["case_id"], "seed": result["seed"]}
                 if result["status"] == "ok":
                     row.update(
                         structural_result(
-                            result["output"], target, result["layout"], case["logical_qubits"]
+                            result["output"],
+                            target,
+                            result["layout"],
+                            case["logical_qubits"],
+                            constraint_form=case["constraint_form"],
                         )
                     )
                 else:

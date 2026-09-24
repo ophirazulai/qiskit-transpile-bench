@@ -26,6 +26,7 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                         result["layout"],
                         case["logical_qubits"],
                         case["options"].get("initial_layout"),
+                        case["constraint_form"],
                     )
                     checks.append(dict(structural, oracle="C0"))
                 if result["status"] != "ok":
@@ -159,7 +160,11 @@ def clifford_checks(comparison, cases):
                         else {"status": "unverified", "detail": output.get("error")}
                     )
                     check.update(
-                        case_id=case["case_id"], revision=revision, seed=output["seed"], mode=mode
+                        case_id=case["case_id"],
+                        revision=revision,
+                        seed=output["seed"],
+                        mode=mode,
+                        oracle="C7",
                     )
                     append_record(comparison.directory / "clifford.jsonl", check)
                     if mode == "prefix":

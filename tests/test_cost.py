@@ -97,6 +97,116 @@ def test_cost_null_calibration_applies_confirmed_rerun_rule():
     assert result["null_rejections"] == [False] * 100
 
 
+def test_companion_batches_seeds_per_arm_round_without_changing_samples(monkeypatch, tmp_path):
+    from qtb.coordinator import costs
+
+    calls = []
+
+    def worker(build, job, directory):
+        calls.append((build["id"], job["mode"], tuple(job["seeds"]), directory, job))
+        return [
+            {"seed": seed, "status": "ok", "samples_ns": [seed + int(build["id"]) + 1]}
+            for seed in job["seeds"]
+        ]
+
+    monkeypatch.setattr(costs, "run_worker", worker)
+    monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
+    case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_reuse"]}
+    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "control", "evolved"))}
+    result = costs.collect_panel(
+        {"run_id": "r", "machine": {}},
+        builds,
+        [case],
+        "companion",
+        tmp_path,
+        2,
+        list(builds),
+        tmp_path,
+        {"warmups": 2, "minimum_calls": 4, "minimum_ns": 250},
+    )
+    assert len(calls) == 6  # two rounds × three arms, rather than 120 processes
+    assert all(
+        mode == "timing_reuse" and seeds == tuple(range(20))
+        for _, mode, seeds, _, _ in calls
+    )
+    assert len({directory for _, _, _, directory, _ in calls}) == 6
+    assert all(
+        (job["warmups"], job["minimum_calls"], job["minimum_ns"]) == (2, 4, 250)
+        for *_, job in calls
+    )
+    assert result["timing_protocol"] == {"warmups": 2, "minimum_calls": 4, "minimum_ns": 250}
+    for arm, build in builds.items():
+        samples = result["arms"][arm]["samples"]["c"]
+        assert samples == {
+            str(seed): [[seed + int(build["id"]) + 1]] * 2 for seed in range(20)
+        }
+
+
+def test_cost_interleaving_seed_is_derived_from_run_and_archived(monkeypatch, tmp_path):
+    from qtb.coordinator import costs
+
+    order = []
+
+    def worker(build, job, directory):
+        order.append(build["id"])
+        return [{"seed": job["seeds"][0], "status": "ok", "samples_ns": [1]}]
+
+    monkeypatch.setattr(costs, "run_worker", worker)
+    monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
+    case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
+    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
+    protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
+
+    def collect(run_id, name):
+        order.clear()
+        bundle = costs.collect_panel(
+            {"run_id": run_id, "machine": {}}, builds, [case], "timing",
+            tmp_path / name, 5, list(builds), tmp_path, protocol,
+        )
+        return bundle, list(order)
+
+    first, first_order = collect("run-one", "first")
+    second, second_order = collect("run-one", "second")
+    third, _ = collect("run-two", "third")
+    assert first_order == second_order
+    assert first["interleaving_seed"] == second["interleaving_seed"]
+    assert first["interleaving_seed"] == costs.interleaving_seed(
+        "run-one", [case], "timing", 5, list(builds)
+    )
+    assert third["interleaving_seed"] != first["interleaving_seed"]
+
+
+def test_incomplete_cost_panel_restarts_all_arms(monkeypatch, tmp_path):
+    from qtb.canonical import read_json, write_json
+    from qtb.coordinator import costs
+
+    panel = tmp_path / "panel"
+    panel.mkdir()
+    write_json(panel / "normal.json", {"complete": False, "session_id": "interrupted"})
+    calls = []
+
+    def worker(build, job, directory):
+        calls.append(build["id"])
+        return [{"seed": job["seeds"][0], "status": "ok", "samples_ns": [100]}]
+
+    monkeypatch.setattr(costs, "run_worker", worker)
+    monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
+    monkeypatch.setattr(costs, "cost_guard", lambda *_: {"result": "passed", "needs_rerun": False})
+    case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
+    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
+    calibration = {"id": "cal", "regimes": {"normal": {"count": 2}, "rerun": {"count": 4}}}
+    protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
+    result = costs.measure_panel(
+        {"run_id": "run", "machine": {}}, builds, [case], "timing", panel,
+        tmp_path, calibration, protocol,
+    )
+    saved = read_json(panel / "normal.json")
+    assert result["result"] == "passed"
+    assert sorted(calls) == sorted(list(builds) * 2)
+    assert saved["complete"] and saved["session_id"] != "interrupted"
+    assert all(len(saved["arms"][arm]["samples"]["c"]) == 2 for arm in builds)
+
+
 def test_cost_replay_ignores_claimed_pass_without_fresh_rerun(tmp_path):
     from qtb.canonical import digest, write_json
     from qtb.coordinator.costs import replay_costs

@@ -133,6 +133,28 @@ def test_swapped_measurement_destinations_rejected():
     assert verify_zero(a, b, None)["status"] == "mismatch"
 
 
+def test_changed_measurement_wire_set_is_a_mismatch():
+    expected = QuantumCircuit(2, 1)
+    expected.h(0)
+    expected.measure(0, 0)
+
+    missing = QuantumCircuit(2, 1)
+    missing.h(0)
+    wrong_wire = QuantumCircuit(2, 1)
+    wrong_wire.h(0)
+    wrong_wire.measure(1, 0)
+
+    for output in (missing, wrong_wire):
+        result = verify_zero(expected, output, None)
+        assert result["status"] == "mismatch"
+        assert result["detail"] == "Different exposed residual wire sets"
+
+    extra = QuantumCircuit(2, 1)
+    extra.h(0)
+    extra.measure(1, 0)
+    assert verify_zero(missing, extra, None)["status"] == "mismatch"
+
+
 def test_trotter_reference_is_product_formula_not_exponential():
     gate = PauliEvolutionGate(
         SparsePauliOp(["X", "Z"], [1.0, 1.0]), time=0.8, synthesis=LieTrotter()

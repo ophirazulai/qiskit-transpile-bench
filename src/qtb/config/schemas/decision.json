@@ -78,6 +78,25 @@
       },
       "minItems": 1
     },
+    "objective": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "trade_score": {
+      "type": ["number", "null"]
+    },
+    "zero_baseline_deltas": {
+      "type": "object"
+    },
+    "exclusions": {
+      "type": ["object", "array"]
+    },
+    "noisy_guard_count": {
+      "type": ["integer", "null"]
+    },
+    "calibrated_false_rejection_rate": {
+      "type": ["number", "null"]
+    },
     "seed_block": {
       "const": "B0"
     }

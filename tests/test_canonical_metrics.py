@@ -85,6 +85,36 @@ def test_directed_legality():
     assert layout_errors(layout([0, 1], [1, 0]), 2, 2, [1, 0])
 
 
+def test_loose_constraints_allow_implicit_operations_only(tmp_path):
+    from qtb.coordinator import structural_result
+
+    target = dict(
+        num_qubits=2,
+        native_2q_names=["cx"],
+        instructions=[dict(name="cx", arity=2, parameters=[], qargs=[[0, 1]])],
+    )
+    header = dict(
+        format=CIRCUIT_FORMAT,
+        num_qubits=2,
+        num_clbits=1,
+        qregs=[["q", 2]],
+        cregs=[["c", 1]],
+        global_phase=(0.0).hex(),
+        parameters=[],
+    )
+    path = tmp_path / "measured.gz"
+    write_circuit(path, header, [op("cx", [0, 1]), op("measure", [1], [0])])
+    assert structural_result(path, target, None, 2, constraint_form="loose")["status"] == "verified"
+    strict = structural_result(path, target, None, 2, constraint_form="target")
+    assert "Unsupported instruction measure" in strict["errors"]
+
+    checker = StructuralChecker(header, target, "loose")
+    checker.consume(op("measure", [0]))
+    checker.consume(op("h", [0]))
+    assert "Wrong classical arity: measure" in checker.result()["errors"]
+    assert "Unsupported instruction h" in checker.result()["errors"]
+
+
 def test_payload_affects_hash():
     assert digest(op("evolution", [0], payload={"hamiltonian": "X"})) != digest(
         op("evolution", [0], payload={"hamiltonian": "Z"})

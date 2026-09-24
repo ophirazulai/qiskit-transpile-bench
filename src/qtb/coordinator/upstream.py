@@ -43,7 +43,7 @@ def prepare_tests(snapshot, directory):
     return runner
 
 
-def python_suite(build, snapshot, directory, locks):
+def python_suite(build, snapshot, directory, locks, timeout_s):
     directory = Path(directory)
     runner = prepare_tests(snapshot, directory)
     results, log = directory / "tests.jsonl", directory / "tests.log"
@@ -73,7 +73,7 @@ def python_suite(build, snapshot, directory, locks):
                 env=env,
                 stdout=stream,
                 stderr=subprocess.STDOUT,
-                timeout=1800,
+                timeout=timeout_s,
                 check=False,
             )
         status = (
@@ -93,7 +93,7 @@ def python_suite(build, snapshot, directory, locks):
     }
 
 
-def rust_suite(build, directory):
+def rust_suite(build, directory, timeout_s):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     log = directory / "rust.log"
@@ -109,7 +109,7 @@ def rust_suite(build, directory):
             Path(build["environment"]).parent / "source",
             env,
             log,
-            timeout=1800,
+            timeout=timeout_s,
         )
         return "passed"
     except HarnessError:
@@ -120,6 +120,7 @@ def rust_suite(build, directory):
 
 
 def upstream_checks(comparison):
+    budgets = comparison.policy["upstream_test_budgets_s"]
     changed = comparison.run.get("changed_paths", [])
     write_json(
         comparison.directory / "changed-tests.json",
@@ -137,6 +138,7 @@ def upstream_checks(comparison):
             baseline["snapshot"]["path"],
             comparison.directory / f"upstream-{revision}",
             comparison.data / "envs",
+            budgets["python"],
         )
         results[revision] = result
         status = result["result"]
@@ -153,7 +155,11 @@ def upstream_checks(comparison):
             )
         )
     rust = {
-        rev: rust_suite(comparison.run["builds"][rev], comparison.directory / f"upstream-{rev}")
+        rev: rust_suite(
+            comparison.run["builds"][rev],
+            comparison.directory / f"upstream-{rev}",
+            budgets["rust"],
+        )
         for rev in ("baseline", "evolved")
     }
     for revision, subject in (("baseline", "reference"), ("evolved", "evolved")):
@@ -169,6 +175,7 @@ def upstream_checks(comparison):
         comparison.run["builds"]["evolved"]["snapshot"]["path"],
         comparison.directory / "upstream-evolved-own",
         comparison.data / "envs",
+        budgets["python"],
     )
     write_json(comparison.directory / "upstream-evolved-own.json", own)
     all_passed = all(

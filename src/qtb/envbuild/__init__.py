@@ -39,6 +39,7 @@ SERIAL = {
     "PYTHONNOUSERSITE": "1",
     "PYTHONSAFEPATH": "1",
 }
+RUST_WHEEL_TIMEOUT_S = 4 * 3600
 
 
 def sanitized_environment(extra=None):
@@ -237,6 +238,12 @@ def build_revision(
     cargo = destination / "cargo"
     cargo.mkdir()
     (cargo / "config.toml").write_text("[net]\nretry = 2\n")
+    # Cargo's registry contains downloaded, checksum-verified crates. Share
+    # downloads, but keep each build's CARGO_HOME config and target/ separate.
+    if cache_root is not None:
+        registry_cache = Path(cache_root).resolve() / "cargo-registry"
+        registry_cache.mkdir(parents=True, exist_ok=True)
+        (cargo / "registry").symlink_to(registry_cache, target_is_directory=True)
     env = sanitized_environment(
         {
             "QISKIT_BUILD_PROFILE": "release",
@@ -315,6 +322,7 @@ def build_revision(
             destination,
             env,
             log,
+            timeout=RUST_WHEEL_TIMEOUT_S,
         )
     if file_hash(cargo_lock) != before:
         raise HarnessError("Qiskit build modified Cargo.lock")

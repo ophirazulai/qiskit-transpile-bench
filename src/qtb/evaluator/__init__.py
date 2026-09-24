@@ -212,6 +212,16 @@ def evaluate_quality(manifest, policy, rows, evidence=()):
     if confirm and objective:
         family_scores = []
         leave_out = []
+
+        def report_summary(name, subset, metric):
+            try:
+                result = paired_panel(subset, observations, metric, list(range(100)))
+            except (Incomplete, HarnessError) as exc:
+                summaries[name] = {"status": "unavailable", "reason": str(exc)}
+                return None
+            summaries[name] = result
+            return result
+
         for dimension in ("family", "optimization_level", "size_band", "topology", "native_basis"):
             for value in sorted({c[dimension] for c in scored}, key=str):
                 subset = [c for c in scored if c[dimension] == value]
@@ -220,25 +230,39 @@ def evaluate_quality(manifest, policy, rows, evidence=()):
                     if dimension in {"family", "optimization_level"}:
                         result = panel_record(id_, subset, metric)
                     else:
-                        result = paired_panel(subset, observations, metric, list(range(100)))
-                        summaries[id_] = result
+                        result = report_summary(id_, subset, metric)
                     if dimension == "family" and metric == "D2":
                         family_scores.append(result)
                 if dimension == "family":
                     rest = [c for c in scored if c[dimension] != value]
-                    leave_out.append(paired_panel(rest, observations, "D2", list(range(100))))
-        breadth = (
+                    leave_out.append(
+                        report_summary(f"leave_family_out/{value}", rest, "D2")
+                    )
+        breadth_complete = (
             len(family_scores) == 8
-            and sum(r is not None and r["ln_score_plus_2SE"] < 0 for r in family_scores) >= 4
+            and all(r is not None for r in family_scores)
+            and all(r is not None for r in leave_out)
+        )
+        breadth = breadth_complete and (
+            sum(r["ln_score_plus_2SE"] < 0 for r in family_scores) >= 4
             and all(r["score"] < 1 for r in leave_out)
         )
-        records.append(record("CA3/breadth", "improvement", "passed" if breadth else "failed"))
+        records.append(
+            record(
+                "CA3/breadth",
+                "improvement",
+                "passed" if breadth else "failed" if breadth_complete else "unresolved",
+                detail=(
+                    "" if breadth_complete else "Family or leave-one-family-out summary unavailable"
+                ),
+            )
+        )
         required.add("CA3/breadth")
         summaries["instance_bootstrap"] = cluster_bootstrap(
             scored, objective, policy["bootstrap_replicates"], policy["rng_seed"]
         )
         rest = [c for c in scored if c["input_group"] not in policy["iterations_groups"]]
-        summaries["leave_iterations_out"] = paired_panel(rest, observations, "D2", list(range(100)))
+        report_summary("leave_iterations_out", rest, "D2")
     elif confirm:
         required.add("CA3/breadth")
     return records, sorted(required), summaries

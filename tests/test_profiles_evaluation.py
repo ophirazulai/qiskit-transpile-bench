@@ -80,6 +80,77 @@ def test_a_a_has_zero_effect_and_never_passes():
     assert summaries["IA2/improvement"]["SE"] == 0
 
 
+def test_empty_confirm_report_summary_still_writes_decision(tmp_path):
+    from qtb.reporter import make_decision, write_report
+
+    manifest, policy, rows, evidence = synthetic("confirm-profile")
+    policy["iterations_groups"] = sorted({c["input_group"] for c in manifest["cases"]})
+    records, required, summaries = evaluate_quality(manifest, policy, rows, evidence)
+    assert summaries["leave_iterations_out"]["status"] == "unavailable"
+    decision = make_decision(
+        {"profile": "confirm-profile", "hashes": {"manifest": "m", "policy": "p"},
+         "run_id": "test"},
+        records, required, summaries, rows,
+    )
+    write_report(tmp_path, decision)
+    assert (tmp_path / "decision.json").exists()
+    assert (tmp_path / "report.md").exists()
+
+
+def test_empty_leave_family_out_is_unresolved():
+    manifest, policy, rows, evidence = synthetic("confirm-profile")
+    for case in manifest["cases"]:
+        if case["role"] == "scored":
+            case["family"] = "G1"
+    records, _, summaries = evaluate_quality(manifest, policy, rows, evidence)
+    breadth = next(r for r in records if r["id"] == "CA3/breadth")
+    assert breadth["result"] == "unresolved"
+    assert summaries["leave_family_out/G1"]["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("guard_regression", [False, True])
+def test_archived_synthetic_observations_replay_to_known_verdict(tmp_path, guard_regression):
+    from qtb.canonical import canonical_bytes, digest, read_json, write_json
+    from qtb.reevaluate import evaluate_run
+
+    manifest, policy, rows, evidence = synthetic("iterations-profile")
+    if guard_regression:
+        guard = next(
+            c for c in manifest["cases"]
+            if c["role"] == "guard" and c["native_basis"] == "cx"
+        )
+        baseline = {
+            row["seed"]: row["D2"] for row in rows
+            if row["case_id"] == guard["case_id"] and row["revision"] == "baseline"
+        }
+        for row in rows:
+            if row["case_id"] == guard["case_id"] and row["revision"] == "evolved":
+                row["D2"] = baseline[row["seed"]] * 1.08
+    hashes = {"manifest": digest(manifest), "policy": digest(policy)}
+    run = {
+        "run_id": "synthetic-run", "profile": "iterations-profile",
+        "hashes": hashes, "builds": {},
+    }
+    write_json(tmp_path / "run.json", run)
+    write_json(tmp_path / "manifest.json", manifest)
+    write_json(tmp_path / "policy.json", policy)
+    write_json(tmp_path / "evidence.json", evidence)
+    write_json(tmp_path / "decision.json", {"archived": True})
+    (tmp_path / "observations.jsonl").write_bytes(
+        b"".join(canonical_bytes(row) + b"\n" for row in rows)
+    )
+    output, decision = evaluate_run(tmp_path)
+    assert decision["status"] == ("CONSTRAINT_VIOLATION" if guard_regression else "PASS")
+    assert read_json(output / "decision.json") == decision
+    assert read_json(tmp_path / "decision.json") == {"archived": True}
+    if guard_regression:
+        assert any(
+            record["id"].endswith(f"cap/{guard['case_id']}/D2")
+            and record["result"] == "failed"
+            for record in decision["constraints"]
+        )
+
+
 def test_guard_failure_outranks_no_improvement():
     manifest, policy, rows, evidence = synthetic(ratio=1.0)
     for row in rows:
@@ -117,6 +188,24 @@ def test_scope_is_conservative_level_aware_and_widen_only():
             "stages"
         ]
     )
+
+
+def test_non_source_changes_do_not_widen_stage_scope():
+    non_source = [
+        "test/python/transpiler/test_sabre.py",
+        "crates/transpiler/tests/vf2.rs",
+        "releasenotes/notes/vf2-change.rst",
+        "docs/transpiler/vf2.md",
+        ".github/workflows/test.yml",
+        "Cargo.lock",
+        "CHANGELOG.md",
+    ]
+    result = changed_scope(["crates/transpiler/src/passes/sabre/layout.rs", *non_source], 2)
+    assert result["stages"] == ["layout", "routing"]
+    assert result["unmapped_paths"] == []
+    assert changed_scope(non_source, 2)["stages"] == []
+    assert changed_scope(non_source, 2, ["init"])["stages"] == ["init"]
+    assert len(changed_scope(["examples/vf2_demo.py"], 2)["stages"]) == 6
 
 
 def test_coverage_cannot_use_substituted_components_or_wrong_contract():

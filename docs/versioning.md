@@ -31,3 +31,9 @@ bundles. An interrupted comparison can resume with its archived manifest, policy
 matching coordinator version. Format migrations must write a new artifact, retain the
 original, record both hashes and the migration code, and repeat the known-outcome tests.
 There is no automatic migration that silently reinterprets an old decision.
+
+`evaluate --run RUN_DIRECTORY` recomputes a verdict from that run's archived manifest,
+policy, observations, evidence, and cost bundles. It accepts a changed evaluator while
+checking the archived manifest and policy hashes. Each replay writes a new decision and
+report under `RUN_DIRECTORY/reevaluations/` with the current evaluator identity and
+original decision hash; it does not change the archived run or original decision.

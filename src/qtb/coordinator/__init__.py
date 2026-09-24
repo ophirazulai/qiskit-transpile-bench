@@ -28,8 +28,11 @@ from qtb.config import (
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.storage import (
     append_record,
+    cache_quality_observation,
+    cached_quality_observation,
     locked,
     prune_outputs,
+    prune_prefix_outputs,
     quality_cache_key,
     read_records,
     register_decision,
@@ -53,11 +56,13 @@ from qtb.metrics.replay import replay
 from qtb.reporter import make_decision, write_report
 
 
-def structural_result(path, target, layout, input_width, initial_layout=None):
+def structural_result(
+    path, target, layout, input_width, initial_layout=None, constraint_form="target"
+):
     hasher = hashlib.sha256()
     lines = circuit_lines(path, hasher)
     header = next(lines)
-    checker = StructuralChecker(header, target)
+    checker = StructuralChecker(header, target, constraint_form)
     for operation in lines:
         checker.consume(operation)
     errors = layout_errors(layout, input_width, header["num_qubits"], initial_layout)
@@ -70,6 +75,19 @@ def structural_result(path, target, layout, input_width, initial_layout=None):
             checker.active_qubits | set(initial[:input_width]) | set(final[:input_width])
         )
     return result
+
+
+def routing_replay_seeds(case, seeds, block="B0"):
+    """C6 scope: scored/basis panels in full, static case guards on ten B0 seeds."""
+    if block != "B0":
+        return []
+    if case["role"] == "scored" or (
+        case["role"] == "guard" and case.get("panel") in {"basis-cx", "basis-ecr"}
+    ):
+        return list(seeds)
+    if case["role"] == "guard" and not case.get("panel"):
+        return [seed for seed in seeds if seed < 10]
+    return []
 
 
 class Comparison:
@@ -169,15 +187,18 @@ class Comparison:
         found = list(wheels.glob("*.whl"))
         if not found:
             project = Path(__file__).resolve().parents[3]
-            if not (project / "pyproject.toml").exists():
-                raise HarnessError("A source checkout is required to build the harness wheel")
-            command = ["uv", "build", "--wheel", "--out-dir", str(wheels), str(project)]
-            run_logged(
-                command,
-                self.directory,
-                sanitized_environment(),
-                self.directory / "harness-build.log",
-            )
+            if (project / "pyproject.toml").exists():
+                command = ["uv", "build", "--wheel", "--out-dir", str(wheels), str(project)]
+                run_logged(
+                    command,
+                    self.directory,
+                    sanitized_environment(),
+                    self.directory / "harness-build.log",
+                )
+            else:
+                from qtb.coordinator.wheel import repack_installed_harness
+
+                repack_installed_harness(wheels)
             found = list(wheels.glob("*.whl"))
         if len(found) != 1:
             raise HarnessError("Expected exactly one harness wheel")
@@ -260,7 +281,7 @@ class Comparison:
         with locked(runner_lock(), shared=True):
             result = run_worker(self.run["builds"][revision], job, directory, hash_seed)
         for row in result:
-            row["job_file"] = str(directory / "job.json")
+            row.setdefault("job_file", str(directory / "job.json"))
         return result
 
     def roundtrip(self, cases, revisions=("baseline", "evolved")):
@@ -332,6 +353,13 @@ class Comparison:
 
     def quality(self, cases, smoke=False, block="B0", revisions=("baseline", "evolved")):
         offsets = {"B0": 0, "KB1": 100, "KB2": 200}
+        builds = self.run["builds"]
+        independent_aa = (
+            "baseline" in builds
+            and "evolved" in builds
+            and builds["baseline"]["id"] == builds["evolved"]["id"]
+        )
+        use_cache = not smoke and not independent_aa
         saved = read_records(self.directory / "observations.jsonl")
         completed = {(r["case_id"], r["revision"], r["seed"], r["seed_block"]) for r in saved}
         for revision in revisions:
@@ -353,15 +381,18 @@ class Comparison:
                     block,
                 )
                 cache = self.root / "quality-cache" / key
-                if not smoke:
+                if use_cache:
                     remaining = []
                     for seed in seeds:
                         path = cache / f"{seed}.json"
                         if path.exists():
-                            cached = read_json(path)
-                            if Path(cached["output"]).exists():
+                            cached = cached_quality_observation(path)
+                            if cached is not None:
                                 cached.update(
-                                    revision=revision, cached=True, case_id=case["case_id"]
+                                    revision=revision,
+                                    cached=True,
+                                    case_id=case["case_id"],
+                                    case_hash=case_hash(case),
                                 )
                                 cached["id"] = digest(
                                     {
@@ -380,12 +411,16 @@ class Comparison:
                                 continue
                         remaining.append(seed)
                     seeds = remaining
-                for start in range(0, len(seeds), 25):
-                    batch = seeds[start : start + 25]
+                batch_size = self.policy["measurement_protocol"]["quality_batch_size"]
+                for start in range(0, len(seeds), batch_size):
+                    batch = seeds[start : start + batch_size]
                     rows = self.job(revision, case, "quality", batch)
                     prefixes = (
                         self.routing_batch(
-                            revision, case, [r["seed"] for r in rows if r["status"] == "ok"]
+                            revision,
+                            case,
+                            [r["seed"] for r in rows if r["status"] == "ok"],
+                            block,
                         )
                         if not smoke
                         else {}
@@ -430,6 +465,7 @@ class Comparison:
                                 result["layout"],
                                 case["logical_qubits"],
                                 case["options"].get("initial_layout"),
+                                case["constraint_form"],
                             )
                             if structural["output_hash"] != result["output_hash"]:
                                 raise HarnessError("Exported output hash mismatch")
@@ -471,18 +507,18 @@ class Comparison:
                                 record(
                                     f"failure/{observation['id']}",
                                     "completeness",
-                                    "failed",
+                                    "unresolved" if result.get("not_attempted") else "failed",
                                     subject,
                                     detail=result.get("error", "Worker failed"),
                                 )
                             )
                         append_record(self.directory / "observations.jsonl", observation)
-                        if result["status"] == "ok" and not smoke:
-                            write_json(cache / f"{result['seed']}.json", observation)
+                        if result["status"] == "ok" and use_cache:
+                            cache_quality_observation(cache, result["seed"], observation)
         return read_records(self.directory / "observations.jsonl")
 
-    def routing_batch(self, revision, case, seeds):
-        seeds = [seed for seed in seeds if case["role"] in {"scored", "guard"} or seed % 100 < 10]
+    def routing_batch(self, revision, case, seeds, block="B0"):
+        seeds = routing_replay_seeds(case, seeds, block)
         if not seeds:
             return {}
         initial = self.job(revision, case, "prefix", seeds, [f"drop_stage:{s}" for s in STAGES[1:]])
@@ -493,7 +529,7 @@ class Comparison:
 
     def check_routing(self, revision, case, observation, prefixes):
         seed = observation["seed"]
-        if case["role"] not in {"scored", "guard"} and seed % 100 >= 10:
+        if not routing_replay_seeds(case, [seed], observation.get("seed_block", "B0")):
             return
         initial, routed = prefixes[seed]
         if initial["status"] != "ok" or routed["status"] != "ok":
@@ -505,13 +541,37 @@ class Comparison:
         h1, ops1 = read_circuit(routed["output"])
         elided = initial["layout"]["final_index_layout"] if initial["layout"] else None
         checked = replay(ops0, ops1, routed["layout"], h0["num_qubits"], h1["num_qubits"], elided)
-        if case["optimization_level"] != 3 and observation["layout"] != routed["layout"]:
-            checked.update(status="mismatch", detail="Full and routing-prefix layouts differ")
+        if observation["layout"] == routed["layout"]:
+            checked["layout_equality"] = "matched"
+        elif case["optimization_level"] == 3:
+            checked.update(
+                layout_equality="skipped",
+                layout_disagreement={
+                    "reason": "Level-3 optimization may reapply layout",
+                    "full": observation["layout"],
+                    "routing_prefix": routed["layout"],
+                },
+            )
+        else:
+            checked.update(
+                status="mismatch",
+                detail="Full and routing-prefix layouts differ",
+                layout_equality="mismatch",
+            )
         checked.update(
             oracle="C6",
             reference_hash=observation["reference_hash"],
             input_domain=case["input_domain"],
             prefix_jobs=[initial["job_file"], routed["job_file"]],
+            prefix_outputs=[
+                {
+                    "stage": stage,
+                    "output": result["output"],
+                    "output_hash": result.get("output_hash"),
+                    "job_file": result["job_file"],
+                }
+                for stage, result in (("initial", initial), ("routed", routed))
+            ],
         )
         observation["checks"].append(checked)
 
@@ -596,6 +656,14 @@ class Comparison:
             )
         )
         for oracle in ("C0", "C6"):
+            required = (
+                expected
+                if oracle == "C0"
+                else 2 * sum(
+                    len(routing_replay_seeds(case, range(case["seeds_per_block"])))
+                    for case in cases
+                )
+            )
             checks = [c for row in quality for c in row["checks"] if c["oracle"] == oracle]
             for revision, subject in (("baseline", "reference"), ("evolved", "evolved")):
                 failures = [
@@ -617,11 +685,12 @@ class Comparison:
                     )
             status = (
                 "passed"
-                if len(checks) == expected and all(c["status"] == "verified" for c in checks)
+                if len(checks) == required and all(c["status"] == "verified" for c in checks)
                 else "unresolved"
             )
             self.evidence(record(f"{self.prefix}1/{oracle}", "correctness", status))
         by_case = {c["case_id"]: c for c in cases}
+        clifford = read_records(self.directory / "clifford.jsonl")
         coverage = []
         for case in cases:
             if case["role"] != "scored":
@@ -632,6 +701,11 @@ class Comparison:
                 if r["case_id"] == case["case_id"] and r["revision"] == "evolved"
                 for c in r["checks"]
             ]
+            checks.extend(
+                c
+                for c in clifford
+                if c.get("case_id") == case["case_id"] and c.get("revision") == "evolved"
+            )
             scope = self.run["scope"][str(case["optimization_level"])]
             if not covered(by_case[case["case_id"]], checks, scope):
                 coverage.append(case["case_id"])
@@ -655,21 +729,21 @@ class Comparison:
         records, required, summaries = evaluate_quality(
             self.manifest, self.policy, rows, self.records
         )
-        from qtb.coordinator.calibration import cost_panels
+        from qtb.coordinator.calibration import required_cost_panels
 
         if "scope" in self.run:
             required = sorted(
-                set(required) | {f"{self.prefix}5/{name}" for name in cost_panels(self)}
+                set(required) | {f"{self.prefix}5/{name}" for name in required_cost_panels(self)}
             )
-        decision = make_decision(self.run, records, required, summaries, rows)
+        decision = make_decision(self.run, records, required, summaries, rows, self.manifest)
         self.run["status"] = "complete"
         self.save()
         write_json(self.directory / "evidence.json", self.records)
         write_report(self.directory, decision)
         if decision["status"] in {"PASS", "NO_IMPROVEMENT"}:
-            prune_outputs(
-                self.directory, rows, self.policy["measurement_protocol"]["output_retention_bytes"]
-            )
+            limit = self.policy["measurement_protocol"]["output_retention_bytes"]
+            prune_outputs(self.directory, rows, limit)
+            prune_prefix_outputs(self.directory, rows, limit)
         return decision
 
     def execute(self, smoke=False):
@@ -682,7 +756,7 @@ class Comparison:
             self.build(need_control=not smoke)
             self.roundtrip(cases if smoke else self.roundtrip_cases())
             if not smoke:
-                from qtb.coordinator.calibration import preflight
+                from qtb.coordinator.calibration import CalibrationIncomplete, preflight
                 from qtb.coordinator.checks import behavior_checks, clifford_checks
                 from qtb.coordinator.upstream import upstream_checks
 
@@ -702,10 +776,25 @@ class Comparison:
                     return self.finish()
                 try:
                     preflight(self, cases)
-                except Incomplete as exc:
+                except CalibrationIncomplete as exc:
                     self.evidence(
-                        record("calibration/cost", "completeness", "unresolved", detail=str(exc))
+                        record(
+                            f"calibration/{exc.phase}",
+                            "completeness",
+                            "unresolved",
+                            detail=str(exc),
+                        )
                     )
+                except Incomplete as exc:
+                    for phase in ("quality", "cost"):
+                        self.evidence(
+                            record(
+                                f"calibration/{phase}",
+                                "completeness",
+                                "unresolved",
+                                detail=str(exc),
+                            )
+                        )
                 behavior_checks(self, revisions=("evolved",))
                 clifford_checks(self, cases)
                 upstream_checks(self)

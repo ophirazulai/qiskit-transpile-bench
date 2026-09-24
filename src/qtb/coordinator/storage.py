@@ -3,12 +3,14 @@
 import fcntl
 import json
 import os
+import shutil
 import tempfile
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 
-from qtb.canonical import canonical_bytes, digest, read_json, write_json
-from qtb.config import PROTOCOL, case_hash
+from qtb.canonical import canonical_bytes, digest, file_hash, read_json, write_json
+from qtb.config import PROTOCOL
 from qtb.envbuild import SERIAL
 from qtb.errors import HarnessError
 
@@ -85,11 +87,23 @@ def quality_cache_key(
 ):
     if mode not in {"quality", "prefix", "roundtrip"}:
         raise HarnessError("Cost observations cannot enter the revision cache")
+    # A cached observation includes checks, so fields that choose those checks
+    # (for example role and constraint form) remain part of its identity.
+    case_definition = {
+        k: v
+        for k, v in case.items()
+        if k
+        not in {
+            "case_id", "weight", "panel", "family", "size_band", "provenance",
+            "seeds_per_block", "timeout_s", "topology", "input_group", "modes",
+            "clifford_variant", "native_basis", "variant", "active_qubits",
+        }
+    }
     return digest(
         {
             "build": build["id"],
-            "case": case_hash(case),
-            "machine": machine,
+            "case": digest(case_definition),
+            "machine_cpu": machine.get("cpu"),
             "protocol": PROTOCOL,
             "harness": harness_hash,
             "block": block,
@@ -98,6 +112,65 @@ def quality_cache_key(
             "worker_environment": dict(SERIAL, PYTHONHASHSEED=hash_seed),
         }
     )
+
+
+def cache_quality_observation(cache, seed, observation):
+    """Keep cache artifacts outside the run directory before retention prunes it."""
+    cache = Path(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    cached = dict(observation)
+    cached["worker"] = dict(observation["worker"])
+    cached["checks"] = deepcopy(observation.get("checks", []))
+
+    def copy_artifact(source, destination):
+        with tempfile.NamedTemporaryFile(dir=cache, delete=False) as temp:
+            temp_path = Path(temp.name)
+            try:
+                with Path(source).open("rb") as stream:
+                    shutil.copyfileobj(stream, temp)
+            except BaseException:
+                temp_path.unlink(missing_ok=True)
+                raise
+        os.replace(temp_path, destination)
+
+    for field, source in (
+        ("output", observation["output"]),
+        ("job_file", observation["worker"]["job_file"]),
+    ):
+        source = Path(source)
+        destination = cache / f"{seed}.{source.name}"
+        copy_artifact(source, destination)
+        if field == "output":
+            cached[field] = str(destination)
+            cached["worker"][field] = str(destination)
+            cached["cache_output_sha256"] = file_hash(destination)
+        else:
+            cached["worker"][field] = str(destination)
+    for check in cached["checks"]:
+        if check.get("oracle") != "C6":
+            continue
+        prefix_jobs = []
+        for index, prefix in enumerate(check.get("prefix_outputs", [])):
+            if not prefix.get("job_file"):
+                continue
+            destination = cache / f"{seed}.prefix-{index}.job.json"
+            copy_artifact(prefix["job_file"], destination)
+            prefix["job_file"] = str(destination)
+            prefix["output"] = None
+            prefix["output_retained"] = False
+            prefix_jobs.append(str(destination))
+        if prefix_jobs:
+            check["prefix_jobs"] = prefix_jobs
+    write_json(cache / f"{seed}.json", cached)
+
+
+def cached_quality_observation(path):
+    """Reject stale or damaged cached outputs rather than reusing their checks."""
+    cached = read_json(path)
+    output = Path(cached["output"])
+    if output.exists() and cached.get("cache_output_sha256") == file_hash(output):
+        return cached
+    return None
 
 
 def register_decision(root, manifest_hash, run_id):
@@ -133,4 +206,46 @@ def prune_outputs(directory, observations, limit):
             # Persist the reason and hash before deletion, preserving replay.
             write_json(path, pruned)
             output.unlink()
+    return pruned
+
+
+def prune_prefix_outputs(directory, observations, limit):
+    """Prune only verified C6 prefixes whose hash and job survive in evidence."""
+    directory = Path(directory).resolve()
+    path = directory / "retention.json"
+    pruned = read_json(path) if path.exists() else {}
+    for row in observations:
+        for check in row.get("checks", []):
+            if check.get("oracle") != "C6" or check.get("status") != "verified":
+                continue
+            for prefix in check.get("prefix_outputs", []):
+                if not all(prefix.get(key) for key in ("output", "output_hash", "job_file")):
+                    continue
+                output = Path(prefix["output"]).resolve()
+                job_file = Path(prefix["job_file"]).resolve()
+                if (
+                    not output.is_relative_to(directory)
+                    or not job_file.is_relative_to(directory)
+                    or output.parent.parent != job_file.parent
+                    or not output.exists()
+                    or not job_file.exists()
+                    or output.stat().st_size <= limit
+                ):
+                    continue
+                job = read_json(job_file)
+                if job.get("mode") != "prefix" or row.get("seed") not in job.get("seeds", []):
+                    continue
+                pruned[str(output)] = {
+                    "oracle": "C6",
+                    "stage": prefix["stage"],
+                    "output_hash": prefix["output_hash"],
+                    "compressed_sha256": file_hash(output),
+                    "observation_id": row["id"],
+                    "job_file": str(job_file),
+                    "compressed_bytes": output.stat().st_size,
+                }
+                # The archived C6 check and job identify the verification and
+                # compile; write retention provenance before removing the file.
+                write_json(path, pruned)
+                output.unlink()
     return pruned

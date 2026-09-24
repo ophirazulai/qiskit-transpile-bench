@@ -64,6 +64,7 @@ def run_seed(job, seed, outdir, inputs):
             "target_hash": digest(export_target(target, target_data["native_2q_names"])),
         }
     if mode in {"quality", "prefix", "diagnostics"}:
+        compile_start = time.perf_counter_ns()
         pm = preset(case, target, seed, job.get("pipeline_edits", []))
         trace = []
 
@@ -77,6 +78,7 @@ def run_seed(job, seed, outdir, inputs):
             )
 
         output = pm.run(circuit, **({"callback": callback} if mode == "diagnostics" else {}))
+        compile_ns = time.perf_counter_ns() - compile_start
         result = save_output(
             output,
             circuit.num_qubits,
@@ -84,6 +86,7 @@ def run_seed(job, seed, outdir, inputs):
             opaque=bool(output.parameters),
         )
         result["fingerprint"] = fingerprint(pm)
+        result["compile_ns"] = compile_ns
         if case["options"].get("scheduling_method"):
             result["start_times_dt"] = list(output.op_start_times)
         if trace:

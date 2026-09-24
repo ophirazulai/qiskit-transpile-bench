@@ -31,12 +31,20 @@ def parser():
         command.add_argument("--results-root", type=Path, default=Path("results"))
         command.add_argument("--resume", type=Path)
         command.add_argument("--change-scope", type=Path)
+    evaluate = commands.add_parser("evaluate")
+    evaluate.add_argument("--run", required=True, type=Path)
     return cli
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "evaluate":
+            from qtb.reevaluate import evaluate_run
+
+            output, result = evaluate_run(args.run)
+            print(f"{result['status']}: {output}")
+            return EXIT_CODES[result["status"]]
         if args.command in {"compare", "smoke"}:
             scope = read_json(args.change_scope)["stages"] if args.change_scope else []
             comparison = Comparison(

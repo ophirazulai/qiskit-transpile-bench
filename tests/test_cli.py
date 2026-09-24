@@ -32,9 +32,13 @@ def test_compare_accepts_confirm_profile():
     assert args.profile == "confirm-profile"
 
 
+def test_evaluate_accepts_archived_run():
+    assert parser().parse_args(["evaluate", "--run", "archive/run"]).run.name == "run"
+
+
 @pytest.mark.parametrize(
     "command",
-    ["calibrate", "derive-exclusions", "evaluate", "report", "repro", "review"],
+    ["calibrate", "derive-exclusions", "report", "repro", "review"],
 )
 def test_removed_commands_are_rejected(command):
     with pytest.raises(SystemExit) as exc:

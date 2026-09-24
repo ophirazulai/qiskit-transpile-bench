@@ -59,3 +59,5 @@ Baseline roles, cost, and oracle coverage still require controlled-runner qualif
 | a2a_multiplier_n16 | test/benchmarks/transpiler_ft.py | Apache-2.0 |
 | a2a_adder_modular_n16 | test/benchmarks/transpiler_ft.py | Apache-2.0 |
 | a2a_mcx_n16 | test/benchmarks/transpiler_ft.py | Apache-2.0 |
+| single_h | test/benchmarks/transpiler_benchmarks.py | Apache-2.0 |
+| cancel_2q | test/benchmarks/transpiler_benchmarks.py | Apache-2.0 |

@@ -1,5 +1,6 @@
 """Decision and report artifacts, without any Qiskit import."""
 
+import math
 from pathlib import Path
 
 from qtb.canonical import atomic_bytes, write_json
@@ -7,12 +8,71 @@ from qtb.config import validate
 from qtb.evaluator import verdict
 
 
-def make_decision(run, records, required_ids, summaries, observations=()):
+def _zero_baseline_deltas(manifest, observations):
+    if manifest is None:
+        return {
+            "status": "unavailable", "reason": "Archived manifest was not supplied", "cases": []
+        }
+    cases = [case for case in manifest["cases"] if case["role"] == "zero_baseline"]
+    if not cases:
+        return {"status": "unavailable", "reason": "No zero-baseline cases", "cases": []}
+    rows = {
+        (row["case_id"], row["revision"], row["seed"]): row
+        for row in observations
+        if row.get("seed_block") == "B0" and row.get("mode") == "quality"
+    }
+    results = []
+    for case in cases:
+        for metric in ("D2", "N2"):
+            deltas = []
+            for seed in range(case["seeds_per_block"]):
+                baseline = rows.get((case["case_id"], "baseline", seed), {}).get(metric)
+                evolved = rows.get((case["case_id"], "evolved", seed), {}).get(metric)
+                if not all(
+                    isinstance(value, (int, float)) and math.isfinite(value)
+                    for value in (baseline, evolved)
+                ):
+                    break
+                deltas.append((evolved - baseline, seed, baseline, evolved))
+            if len(deltas) != case["seeds_per_block"]:
+                results.append(
+                    {"case_id": case["case_id"], "metric": metric, "status": "unavailable",
+                     "reason": "Incomplete paired observations"}
+                )
+                continue
+            delta, seed, baseline, evolved = max(deltas, key=lambda item: item[0])
+            results.append(
+                {"case_id": case["case_id"], "metric": metric, "status": "reported",
+                 "worst_delta": delta, "worst_seed": seed, "baseline": baseline,
+                 "evolved": evolved, "seed_count": len(deltas)}
+            )
+    return {"status": "reported", "cases": results}
+
+
+def make_decision(run, records, required_ids, summaries, observations=(), manifest=None):
+    observations = list(observations)
     status = verdict(records, required_ids)
+    prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
+    depth = summaries.get(f"{prefix}2/improvement", {})
+    gates = summaries.get(f"{prefix}3/primary/N2", {})
+    objective = (
+        [{"block": "B0", "metric": "D2", "panel": "confirm" if prefix == "CA" else "cz",
+          "reference": "baseline", **{key: depth[key] for key in
+          ("score", "ln_score", "SE", "ln_score_plus_2SE")}}]
+        if all(key in depth for key in ("score", "ln_score", "SE", "ln_score_plus_2SE"))
+        else []
+    )
+    trade_score = (
+        math.sqrt(depth["score"] * gates["score"])
+        if all(isinstance(item.get("score"), (int, float)) and item["score"] > 0
+               for item in (depth, gates))
+        else None
+    )
     fingerprints = {}
     for row in observations:
         if row.get("seed_block") == "B0" and row.get("seed") == 0 and row.get("fingerprint"):
             fingerprints.setdefault(row["case_id"], {})[row["revision"]] = row["fingerprint"]
+    calibration = run.get("calibrations", {}).get("false_rejection") or {}
     decision = {
         "format": "qtb-decision/1",
         "status": status,
@@ -29,16 +89,25 @@ def make_decision(run, records, required_ids, summaries, observations=()):
         "identities": {k: v["id"] for k, v in run.get("builds", {}).items()},
         "constraints": records,
         "required_ids": sorted(required_ids),
+        "objective": objective,
+        "trade_score": trade_score,
+        "zero_baseline_deltas": _zero_baseline_deltas(manifest, observations),
         "summaries": summaries,
         "scope": run.get("scope", {}),
         "measurement_timestamp": run.get("created_at"),
-        "calibration": run.get("calibrations", {}).get("false_rejection"),
+        "calibration": calibration or None,
+        "noisy_guard_count": calibration.get("noisy_guard_count"),
+        "calibrated_false_rejection_rate": calibration.get("combined"),
         "fingerprint_changes": {
             case: pair
             for case, pair in sorted(fingerprints.items())
             if pair.get("baseline") != pair.get("evolved")
         },
         "coverage_gaps": run.get("coverage_gaps", []),
+        "exclusions": run.get(
+            "exclusions",
+            {"status": "unavailable", "reason": "No frozen exclusions artifact was recorded"},
+        ),
         "reasons": [
             {"code": r["id"], "result": r["result"], "detail": r.get("detail", "")}
             for r in records
@@ -76,6 +145,24 @@ def render_report(decision):
         for missing in decision["missing_records"]:
             lines.append(f"- **missing** `{missing}`")
         lines.append("")
+    if decision.get("objective"):
+        objective = decision["objective"][0]
+        lines += [
+            f"Primary D2 ratio: {objective['score']:.6f} "
+            f"(paired SE {objective['SE']:.6f}; upper 2 SE log effect "
+            f"{objective['ln_score_plus_2SE']:.6f}).",
+            "",
+        ]
+    else:
+        lines += ["Primary D2 estimate: unavailable from saved observations.", ""]
+    trade = decision.get("trade_score")
+    trade_text = (
+        f"{trade:.6f}." if trade is not None else "unavailable; both primary ratios are required."
+    )
+    lines += [
+        "Review trade score sqrt(D2 ratio × N2 ratio): " + trade_text,
+        "",
+    ]
     lines += [
         "## Quality estimates",
         "",
@@ -83,11 +170,33 @@ def render_report(decision):
         "| --- | ---: | ---: | ---: |",
     ]
     for name, summary in decision["summaries"].items():
-        if "score" in summary and "/cap/" not in name:
+        if "score" in summary and name.startswith(("IA2/", "IA3/", "CA2/", "CA3/")):
             lines.append(
                 f"| {name} | {summary['score']:.6f} | {summary['SE']:.6f} | "
                 f"{summary['ln_score_plus_2SE']:.6f} |"
             )
+    lines += [
+        "",
+        "## Marginal quality estimates",
+        "",
+        "| Dimension | Value | Metric | Ratio | Paired SE | Cases | Seeds |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for name, summary in sorted(decision["summaries"].items()):
+        parts = name.split("/")
+        if len(parts) != 4 or parts[1] not in {
+            "family", "optimization_level", "size_band", "topology", "native_basis"
+        }:
+            continue
+        dimension, value, metric = parts[1:]
+        if "score" in summary:
+            lines.append(
+                f"| {dimension} | {value} | {metric} | {summary['score']:.6f} | "
+                f"{summary['SE']:.6f} | {len(summary.get('cases', {}))} | "
+                f"{len(summary.get('seeds', []))} |"
+            )
+        else:
+            lines.append(f"| {dimension} | {value} | {metric} | unavailable | — | — | — |")
     bootstrap = decision["summaries"].get("instance_bootstrap")
     if bootstrap:
         lines += [
@@ -98,6 +207,15 @@ def render_report(decision):
                 if bootstrap.get("status") == "reported"
                 else bootstrap.get("reason", "Unavailable")
             ),
+            "Input groups by family: "
+            + (
+                ", ".join(
+                    f"{family}: {count}"
+                    for family, count in sorted(bootstrap.get("group_counts", {}).items())
+                )
+                or "unavailable"
+            )
+            + ".",
             "",
         ]
     lines += [
@@ -113,6 +231,24 @@ def render_report(decision):
             lines.append(
                 f"| {name.split('/cap/', 1)[1]} | {summary['score']:.6f} | {item['worst_seed']} |"
             )
+    lines += [
+        "",
+        "## Zero-baseline changes",
+        "",
+        "| Case | Metric | Worst delta | Seed | Baseline | Evolved |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    zero = decision.get("zero_baseline_deltas", {})
+    for row in zero.get("cases", []):
+        if row["status"] == "reported":
+            lines.append(
+                f"| {row['case_id']} | {row['metric']} | {row['worst_delta']} | "
+                f"{row['worst_seed']} | {row['baseline']} | {row['evolved']} |"
+            )
+        else:
+            lines.append(f"| {row['case_id']} | {row['metric']} | unavailable | — | — | — |")
+    if zero.get("status") != "reported":
+        lines.append(f"Unavailable: {zero.get('reason', 'No paired observations')}.")
     lines += [
         "",
         "## Compilation cost",
@@ -143,13 +279,46 @@ def render_report(decision):
     ]
     for gap in decision.get("coverage_gaps", []):
         lines.append(f"- Declared workload gap: {gap}")
+    coverage = next(
+        (row for row in decision["constraints"] if row["id"].endswith("/stage-coverage")),
+        None,
+    )
+    if coverage:
+        lines.append(f"Stage coverage: {coverage['result']}.")
+        if coverage.get("cases"):
+            lines.append("Uncovered scored cases: " + ", ".join(coverage["cases"]) + ".")
+    exclusions = decision.get("exclusions", {})
+    lines += ["", "## Exclusions", ""]
+    if isinstance(exclusions, dict) and exclusions.get("status") == "unavailable":
+        lines.append("Unavailable: " + exclusions["reason"] + ".")
+    else:
+        lines.append(__import__("json").dumps(exclusions, sort_keys=True))
     changes = decision.get("fingerprint_changes", {})
     if changes:
         lines += [
             "",
-            "Pipeline fingerprints changed for: " + ", ".join(f"`{c}`" for c in changes) + ".",
-            "Pass names and observed search budgets are archived in `decision.json`; "
-            "unavailable budget fields remain `unknown`.",
+            "## Pipeline fingerprint differences",
+            "",
+            "| Case | Stage | Baseline passes | Evolved passes | Budget changed |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for case, pair in sorted(changes.items()):
+            baseline, evolved = pair.get("baseline", {}), pair.get("evolved", {})
+            for stage in sorted(baseline.keys() | evolved.keys()):
+                before, after = baseline.get(stage, []), evolved.get(stage, [])
+                if before == after:
+                    continue
+                before_names = ", ".join(item["pass"] for item in before) or "—"
+                after_names = ", ".join(item["pass"] for item in after) or "—"
+                budget_changed = [item.get("budget") for item in before] != [
+                    item.get("budget") for item in after
+                ]
+                lines.append(
+                    f"| {case} | {stage} | {before_names} | {after_names} | "
+                    f"{'yes' if budget_changed else 'no'} |"
+                )
+        lines += [
+            "Unknown budget values remain marked `unknown` in `decision.json`.",
             "",
         ]
     return "\n".join(lines)

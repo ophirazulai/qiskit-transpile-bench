@@ -41,6 +41,7 @@ def run_worker(build, job, directory, hash_seed="0"):
         str(result_dir),
     ]
     timeout, last, completed = job["timeout_s"], time.monotonic(), 0
+    timed_out = False
     with (directory / "worker.log").open("wb") as log:
         process = subprocess.Popen(
             command,
@@ -56,6 +57,7 @@ def run_worker(build, job, directory, hash_seed="0"):
                 if len(rows) > completed:
                     completed, last = len(rows), time.monotonic()
                 if time.monotonic() - last > timeout:
+                    timed_out = True
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
                     break
@@ -74,16 +76,48 @@ def run_worker(build, job, directory, hash_seed="0"):
         seen.add(row["seed"])
     if seen != expected:
         pending = [seed for seed in job["seeds"] if seed not in seen]
+        log_path = directory / "worker.log"
+        with log_path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 4096))
+            log_tail = stream.read().decode("utf-8", errors="replace").strip()
+        reason = "Worker timed out" if timed_out else "Worker exited before completing the batch"
+        if log_tail:
+            reason += f": {log_tail}"
         results.append(
             {
                 "protocol": PROTOCOL,
                 "status": "error",
                 "mode": job["mode"],
                 "seed": pending[0],
-                "error": "Worker timeout or unexpected exit",
+                "error": reason,
                 "returncode": process.returncode,
-                "log": str(directory / "worker.log"),
+                "log": str(log_path),
             }
         )
-        # A completed seed is durable; unattempted seeds can be rescheduled on resume.
+        if timed_out and len(pending) > 1:
+            # The first missing seed was interrupted. Run the later seeds in a
+            # fresh process so one slow compile cannot discard the rest.
+            retry_job = dict(job, seeds=pending[1:])
+            results.extend(
+                run_worker(build, retry_job, directory / f"retry-{pending[1]}", hash_seed)
+            )
+        elif len(pending) > 1:
+            # A start-up or process failure may recur for every seed. Preserve
+            # completeness without launching a failing process for each one.
+            results.extend(
+                {
+                    "protocol": PROTOCOL,
+                    "status": "error",
+                    "mode": job["mode"],
+                    "seed": seed,
+                    "error": f"Not attempted after abnormal worker exit for seed {pending[0]}",
+                    "not_attempted": True,
+                    "returncode": process.returncode,
+                    "log": str(log_path),
+                }
+                for seed in pending[1:]
+            )
+    for row in results:
+        row.setdefault("job_file", str(directory / "job.json"))
     return results

@@ -100,7 +100,7 @@ def policy(profile):
     return dict(
         format="qtb-policy/1",
         profile=profile,
-        version=1,
+        version=2,
         required_ids=required,
         quality_prerequisites=["harness/roundtrip", "audit/determinism"],
         practical_ratio=0.99 if prefix == "CA" else 1.0,
@@ -256,6 +256,18 @@ def curate(source, root=ROOT):
                 circuit.cx(0, 1)
         circuits[name] = circuit
         artifacts[name] = persist(name, circuit)
+        provenance.append(
+            dict(
+                input_group=name,
+                source="test/benchmarks/transpiler_benchmarks.py",
+                commit="0131cbbcc",
+                qiskit=qiskit.__version__,
+                artifact=artifacts[name],
+                license="Apache-2.0",
+                matrix_seed=None,
+                replaces=None,
+            )
+        )
     rng = random.Random(20260924)
     variants = {}
     for name in ITERATIONS:
@@ -369,6 +381,12 @@ def curate(source, root=ROOT):
             optimization_level=None,
             target=targets["mumbai_27_loose"],
             semantic_reference={"kind": "input"},
+            family="timing_microbenchmark",
+            provenance={
+                "commit": "0131cbbcc",
+                "grade": "A",
+                "source": "test/benchmarks/transpiler_benchmarks.py",
+            },
             **recipes["mumbai_27_loose"],
         )
         timing.append(timed(c, f"T{i}", 20220125))
@@ -428,7 +446,7 @@ def curate(source, root=ROOT):
         manifest = dict(
             format="qtb-manifest/1",
             profile=profile,
-            version=1,
+            version=2,
             cases=cases,
             status="unqualified",
             coverage_gaps=[
