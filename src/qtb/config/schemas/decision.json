@@ -91,11 +91,8 @@
     "exclusions": {
       "type": ["object", "array"]
     },
-    "noisy_guard_count": {
-      "type": ["integer", "null"]
-    },
-    "calibrated_false_rejection_rate": {
-      "type": ["number", "null"]
+    "cost_thresholds": {
+      "type": ["object", "null"]
     },
     "seed_block": {
       "const": "B0"

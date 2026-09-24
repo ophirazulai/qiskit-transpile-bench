@@ -39,13 +39,12 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 
 | Path | Written by | Content |
 | --- | --- | --- |
-| `run.json` | Coordinator | Run ID, profile, hashes (manifest, policy, coordinator, harness wheel, implementation), machine identity, source paths, builds, changed paths, change scope per level, calibration summary, status |
+| `run.json` | Coordinator | Run ID, profile, hashes (manifest, policy, coordinator, harness wheel, implementation), machine identity, source paths, builds, changed paths, change scope per level, status |
 | `manifest.json`, `policy.json` | Coordinator | Archived copies of the profile used, so a run can be re-evaluated even if the profile changes |
-| `evidence.json` | Coordinator | Every constraint record gathered so far: round-trip, preflight, correctness, calibration, audit, cost |
+| `evidence.json` | Coordinator | Every constraint record gathered so far: round-trip, preflight, correctness, audit, cost |
 | `observations.jsonl` | Coordinator | One line per quality compile (see below) |
 | `correctness.jsonl` | `compare` | Every C0–C5 check from the correctness suite |
 | `clifford.jsonl` | `compare` | C7 results for full and prefix pipelines |
-| `role-freeze.jsonl` | `compare` (first calibration) | 300-seed baseline audit of deterministic, zero-baseline and canary roles |
 | `changed-tests.json` | `compare` | Test files and Rust sources that the evolved tree changed |
 | `upstream-baseline/`, `upstream-evolved/` | `compare` | Upstream pytest records (`tests.jsonl`), logs and `rust.log` |
 | `upstream-evolved-own.json` | `compare` | Report-only run of the candidate's own Python tests |
@@ -62,7 +61,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `reevaluations/<timestamp>/` | `evaluate --run` | A recomputed `decision.json` and `report.md`; the original is never changed |
 
 Outside the run directory, the results root also holds shared caches and counters:
-`build-cache/`, `quality-cache/`, `calibrations/`, `decision-counts.json` and `qualifications/`.
+`build-cache/`, `quality-cache/`, `decision-counts.json` and `qualifications/`.
 See [architecture.md](architecture.md#caches-and-shared-state-in-the-results-root).
 
 ## `smoke.json`
@@ -92,7 +91,7 @@ Schema: `src/qtb/config/schemas/decision.json` (format `qtb-decision/1`).
 | `missing_records` | Required IDs with no record at all |
 | `summaries` | Per-panel estimates: `ln_score`, `score`, `SE`, `ln_score_plus_2SE`, per-seed `deltas`, and per-case estimates with `worst_seed`; confirm also has `instance_bootstrap` and `leave_iterations_out` |
 | `scope` | Changed stages, substituted components and unmapped paths, per optimization level |
-| `calibration` | Noisy-guard count and false-rejection rates (quality, cost, combined) |
+| `cost_thresholds` | The fixed cost thresholds of the archived policy that every cost record was judged against |
 | `fingerprint_changes` | Cases whose pipeline fingerprint (pass list and search budgets, seed 0) differs between revisions |
 | `coverage_gaps` | The profile's declared coverage gaps |
 | `measurement_timestamp` | When the run was created |
@@ -114,8 +113,8 @@ The same information as `decision.json`, written for people. Sections, in order:
 1. **Title:** `# <STATUS> — <profile>`, the number of earlier decisions for this manifest,
    and a reminder that the baseline is the reference and that confirm is a check, not a
    tuning loop.
-2. **Calibration line** (when available): number of noisy guards and the calibrated
-   family-wise false-rejection estimate (quality, cost, combined).
+2. **Cost thresholds line:** the fixed panel and per-case thresholds from the policy, with a
+   reminder that they are not calibrated on this machine.
 3. **Constraints needing attention:** every record that is `failed`, `unresolved` or
    `not_evaluated`, with its detail, and every required record that is missing. **Start here
    when the verdict is not `PASS`.**

@@ -15,8 +15,7 @@ Code: `src/qtb/envbuild/__init__.py` (snapshot and build) and `Comparison._build
 | Revision envs | `results/runs/<run>/builds/<revision>-build/env/` | Qiskit built from that revision's snapshot, pinned runtime dependencies, the harness wheel | Workers: compiling, timing, memory, upstream tests |
 | Verifier env | `results/runs/<run>/verifier/env/` | Released Qiskit 2.5.2, pinned dependencies, the harness wheel | Semantic oracles ([verifier.md](verifier.md)) |
 
-`smoke` and `compare` both build baseline, evolved and verifier. Cost calibration times the
-baseline env as both A/A arms.
+`smoke` and `compare` both build baseline, evolved and verifier.
 
 ## The `envs/` directory
 
@@ -175,4 +174,4 @@ installed package.
 - "Import provenance escaped isolated environment": something on the path shadows the
   installed Qiskit. Check for a stray `PYTHONPATH` or `.pth` file.
 - Run `smoke` first after changing toolchains or source trees. It catches all of these
-  without the correctness and calibration work of `compare`.
+  without the correctness and cost work of `compare`.

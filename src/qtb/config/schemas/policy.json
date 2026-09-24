@@ -53,9 +53,7 @@
         "timing_rounds": {"type": "integer", "minimum": 1},
         "companion_rounds": {"type": "integer", "minimum": 1},
         "memory_processes": {"type": "integer", "minimum": 1},
-        "rerun_multiplier": {"type": "integer", "minimum": 2},
-        "calibration_rounds": {"type": "integer", "minimum": 2},
-        "calibration_memory_processes": {"type": "integer", "minimum": 2}
+        "rerun_multiplier": {"type": "integer", "minimum": 2}
       },
       "required": [
         "quality_batch_size",
@@ -66,10 +64,27 @@
         "timing_rounds",
         "companion_rounds",
         "memory_processes",
-        "rerun_multiplier",
-        "calibration_rounds",
-        "calibration_memory_processes"
+        "rerun_multiplier"
       ]
+    },
+    "cost_thresholds": {
+      "description": "Fixed cost guards; no machine calibration is measured",
+      "type": "object",
+      "properties": {
+        "panel_ratio": {"type": "number", "exclusiveMinimum": 1},
+        "case_ratio": {"type": "number", "exclusiveMinimum": 1},
+        "case_floor_ns": {"type": "integer", "minimum": 0},
+        "case_floor_bytes": {"type": "integer", "minimum": 0},
+        "screen_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      },
+      "required": [
+        "panel_ratio",
+        "case_ratio",
+        "case_floor_ns",
+        "case_floor_bytes",
+        "screen_fraction"
+      ],
+      "additionalProperties": false
     },
     "upstream_test_budgets_s": {
       "type": "object",
@@ -107,6 +122,7 @@
     "improvement_multiplier",
     "guard_multiplier",
     "measurement_protocol",
+    "cost_thresholds",
     "upstream_test_budgets_s",
     "bootstrap_replicates",
     "rng_seed",

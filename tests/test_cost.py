@@ -1,43 +1,69 @@
-from datetime import UTC, datetime
+import math
+from copy import deepcopy
 
 import pytest
 
+from qtb.canonical import digest, read_json, write_json
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator.cost import (
-    calibrate_cost,
     cost_estimate,
     cost_guard,
     regime_counts,
+    thresholds,
+    thresholds_id,
     validate_bundle,
 )
 
-SCREENED = {
-    "screen_rounds": 2,
-    "timing_rounds": 4,
-    "rerun_multiplier": 2,
-    "calibration_rounds": 8,
-    "warmups": 1,
-    "minimum_calls": 2,
-    "minimum_ns": 1_000_000_000,
+POLICY = {
+    "measurement_protocol": {
+        "screen_rounds": 2,
+        "timing_rounds": 4,
+        "rerun_multiplier": 2,
+        "companion_rounds": 3,
+        "memory_processes": 5,
+        "warmups": 1,
+        "minimum_calls": 2,
+        "minimum_ns": 1_000_000_000,
+    },
+    "cost_thresholds": {
+        "panel_ratio": 1.03,
+        "case_ratio": 1.10,
+        "case_floor_ns": 25_000_000,
+        "case_floor_bytes": 33_554_432,
+        "screen_fraction": 0.5,
+    },
 }
+UNSCREENED = deepcopy(POLICY)
+UNSCREENED["measurement_protocol"].update(screen_rounds=0, timing_rounds=2)
 
 
 def test_regime_counts_follow_the_policy_and_reject_nonsense():
-    assert regime_counts("timing") == ({"normal": 10, "rerun": 20}, 30)
-    assert regime_counts("timing", SCREENED) == ({"screen": 2, "normal": 4, "rerun": 8}, 8)
-    assert regime_counts("timing", dict(SCREENED, screen_rounds=0)) == (
-        {"normal": 4, "rerun": 8},
-        8,
-    )
-    assert regime_counts("companion", {"companion_rounds": 3, "calibration_rounds": 30}) == (
-        {"normal": 3, "rerun": 6},
-        30,
-    )
-    assert regime_counts("memory", {"memory_processes": 5}) == ({"normal": 5, "rerun": 10}, 10)
+    protocol = POLICY["measurement_protocol"]
+    assert regime_counts("timing") == {"normal": 10, "rerun": 20}
+    assert regime_counts("timing", protocol) == {"screen": 2, "normal": 4, "rerun": 8}
+    assert regime_counts("timing", dict(protocol, screen_rounds=0)) == {"normal": 4, "rerun": 8}
+    assert regime_counts("companion", protocol) == {"normal": 3, "rerun": 6}
+    assert regime_counts("memory", protocol) == {"normal": 5, "rerun": 10}
     with pytest.raises(HarnessError):
-        regime_counts("timing", dict(SCREENED, screen_rounds=4))
+        regime_counts("timing", dict(protocol, screen_rounds=4))
     with pytest.raises(HarnessError):
-        regime_counts("timing", dict(SCREENED, calibration_rounds=6))
+        regime_counts("unknown")
+
+
+def test_thresholds_are_fixed_by_policy():
+    screen = thresholds(POLICY, "timing", "screen")
+    full = thresholds(POLICY, "timing", "normal")
+    assert screen["count"] == 2 and full["count"] == 4
+    assert math.isclose(full["noise_panel"], math.log(1.03))
+    assert math.isclose(screen["noise_panel"], 0.5 * math.log(1.03))
+    assert full["case_ratio"] == 1.10 and full["floor"] == 25_000_000
+    assert thresholds(POLICY, "memory", "rerun")["floor"] == 33_554_432
+    with pytest.raises(Incomplete):
+        thresholds(UNSCREENED, "timing", "screen")
+    assert thresholds_id(POLICY) == thresholds_id(deepcopy(POLICY))
+    assert thresholds_id(POLICY) != thresholds_id(
+        {"cost_thresholds": dict(POLICY["cost_thresholds"], panel_ratio=1.05)}
+    )
 
 
 def test_distinct_estimators():
@@ -47,57 +73,44 @@ def test_distinct_estimators():
     assert cost_estimate(samples, "companion") == 10.5
 
 
-def test_memory_calibration_resamples_with_replacement():
-    arms = {a: {"case": list(range(100, 110))} for a in ("baseline", "replica")}
-    result = calibrate_cost(
-        arms, "memory", {"case": 1}, {"cpu": "test"}, datetime.now(UTC).isoformat(), replicates=100
-    )
-    assert result["regimes"]["normal"]["floors"]["case"] > 0
-    assert result["regimes"]["rerun"]["floors"]["case"] > 0
-    assert result == calibrate_cost(
-        arms, "memory", {"case": 1}, {"cpu": "test"}, result["created_at"], replicates=100
-    )
-
-
-def bundle_and_calibration(ratio=1.15, regime="normal"):
-    now = datetime.now(UTC).isoformat()
-    calibration = calibrate_cost(
-        {a: {"c": [[80]] * 30} for a in ("baseline", "replica")},
-        "timing",
-        {"c": 1},
-        {"cpu": "test"},
-        now,
-        replicates=20,
-    )
-    bundle = dict(
+def bundle(ratios, regime="normal", policy=POLICY, session="session", baseline_ns=10**9):
+    """A two-arm timing bundle; ``ratios`` maps case → evolved/baseline ratio."""
+    count = regime_counts("timing", policy["measurement_protocol"])[regime]
+    return dict(
         complete=True,
         run_id="run",
-        session_id="session",
+        session_id=session,
         regime=regime,
-        machine=calibration["machine"],
-        calibration_id=calibration["id"],
-        measured_at=now,
+        estimator="timing",
+        machine={},
+        thresholds_id=thresholds_id(policy),
         arms={
             arm: dict(
-                arm_id=arm,
-                session_id="session",
+                arm_id=f"{session}-{arm}",
+                session_id=session,
                 build_id="identical",
-                samples={"c": [[80 * value]] * (20 if regime == "rerun" else 10)},
+                samples={
+                    case: [[int(baseline_ns * (ratio if arm == "evolved" else 1))]] * count
+                    for case, ratio in ratios.items()
+                },
             )
-            for arm, value in [("baseline", 1), ("evolved", ratio)]
+            for arm in ("baseline", "evolved")
         },
     )
-    return bundle, calibration
+
+
+def weights(ratios):
+    return {case: 1 / len(ratios) for case in ratios}
 
 
 def test_fresh_baseline_prevents_historical_100ms_hiding_92ms_regression():
-    bundle, calibration = bundle_and_calibration()
-    assert cost_guard(bundle, calibration, "run")["needs_rerun"]
+    slow = bundle({"c": 1.15})
+    assert cost_guard(slow, POLICY, "timing", weights({"c": 1}), "run")["needs_rerun"]
     with pytest.raises(Incomplete):
-        validate_bundle(bundle, calibration, run_id="new-run")
-    bundle["arms"]["baseline"]["session_id"] = "old"
+        validate_bundle(slow, POLICY, "timing", weights({"c": 1}), run_id="new-run")
+    slow["arms"]["baseline"]["session_id"] = "old"
     with pytest.raises(HarnessError):
-        validate_bundle(bundle, calibration)
+        validate_bundle(slow, POLICY, "timing", weights({"c": 1}))
 
 
 @pytest.mark.parametrize(
@@ -110,74 +123,58 @@ def test_fresh_baseline_prevents_historical_100ms_hiding_92ms_regression():
     ],
 )
 def test_rerun(ratio, regime, expected):
-    bundle, calibration = bundle_and_calibration(ratio, regime)
-    assert cost_guard(bundle, calibration)["result"] == expected
+    result = cost_guard(bundle({"c": ratio}, regime), POLICY, "timing", weights({"c": 1}))
+    assert result["result"] == expected
+    assert result["threshold"] == thresholds(POLICY, "timing", regime)
 
 
 def test_identical_builds_cannot_coalesce_arms():
-    bundle, calibration = bundle_and_calibration()
-    bundle["arms"]["evolved"]["arm_id"] = "baseline"
+    same = bundle({"c": 1.15})
+    same["arms"]["evolved"]["arm_id"] = same["arms"]["baseline"]["arm_id"]
     with pytest.raises(HarnessError):
-        validate_bundle(bundle, calibration)
+        validate_bundle(same, POLICY, "timing", weights({"c": 1}))
 
 
-def test_cost_null_calibration_applies_confirmed_rerun_rule():
-    arms = {a: {"case": [[100]] * 30} for a in ("baseline", "replica")}
-    result = calibrate_cost(
-        arms, "timing", {"case": 1}, {}, datetime.now(UTC).isoformat(), replicates=100
-    )
-    assert result["false_rejection_rate"] == 0
-    assert result["null_rejections"] == [False] * 100
+def test_bundle_must_match_the_policy_thresholds_and_estimator():
+    other = deepcopy(POLICY)
+    other["cost_thresholds"]["panel_ratio"] = 1.05
+    with pytest.raises(Incomplete, match="different thresholds"):
+        cost_guard(bundle({"c": 1.0}), other, "timing", weights({"c": 1}))
+    with pytest.raises(Incomplete, match="estimator"):
+        cost_guard(bundle({"c": 1.0}), POLICY, "memory", weights({"c": 1}))
+    with pytest.raises(Incomplete, match="not part of the protocol"):
+        cost_guard(bundle({"c": 1.0}, "screen"), UNSCREENED, "timing", weights({"c": 1}))
 
 
-def screened_bundle(calibration, ratio, regime, session="session"):
-    count = calibration["regimes"][regime]["count"]
-    return dict(
-        complete=True,
-        run_id="run",
-        session_id=session,
-        regime=regime,
-        machine=calibration["machine"],
-        calibration_id=calibration["id"],
-        measured_at=calibration["created_at"],
-        arms={
-            arm: dict(
-                arm_id=f"{session}-{arm}",
-                session_id=session,
-                build_id="identical",
-                samples={"c": [[80 * value]] * count},
-            )
-            for arm, value in [("baseline", 1), ("evolved", ratio)]
-        },
-    )
+def test_floors_protect_millisecond_cases_from_jitter():
+    # A 15% wobble on a 1 ms case is 0.15 ms, far under the 25 ms floor; a 12%
+    # slowdown of a 1 s case is 120 ms and counts.
+    mixed = bundle({"tiny": 1.0, "big": 1.0})
+    mixed["arms"]["evolved"]["samples"]["tiny"] = [[1_150_000]] * 4
+    mixed["arms"]["baseline"]["samples"]["tiny"] = [[1_000_000]] * 4
+    mixed["arms"]["evolved"]["samples"]["big"] = [[1_120_000_000]] * 4
+    result = cost_guard(mixed, POLICY, "timing", weights({"tiny": 1, "big": 1}))
+    assert result["candidate"]["cap_breaches"] == ["big"]
+    only_tiny = bundle({"tiny": 1.0, "big": 1.0})
+    only_tiny["arms"]["evolved"]["samples"]["tiny"] = [[1_150_000]] * 4
+    only_tiny["arms"]["baseline"]["samples"]["tiny"] = [[1_000_000]] * 4
+    only_tiny["arms"]["evolved"]["samples"]["big"] = [[1_000_000_000]] * 4
+    only_tiny["arms"]["baseline"]["samples"]["big"] = [[1_000_000_000]] * 4
+    result = cost_guard(only_tiny, POLICY, "timing", weights({"tiny": 1, "big": 1}))
+    assert result["candidate"]["cap_breaches"] == []
 
 
-def test_screen_regime_is_calibrated_and_judged_against_the_full_band():
-    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "replica")}
-    calibration = calibrate_cost(
-        arms, "timing", {"c": 1}, {"cpu": "test"}, datetime.now(UTC).isoformat(),
-        replicates=20, protocol=SCREENED,
-    )
-    assert [r["count"] for r in calibration["regimes"].values()] == [2, 4, 8]
-    assert calibration["collected"] == 8
-    clean = cost_guard(screened_bundle(calibration, 1.0, "screen"), calibration)
+def test_screen_must_clear_a_fraction_of_the_full_band():
+    w = weights({"c": 1})
+    clean = cost_guard(bundle({"c": 1.0}, "screen"), POLICY, "timing", w)
     assert (clean["result"], clean["regime"], clean["count"]) == ("passed", "screen", 2)
     assert not clean["needs_full"] and not clean["needs_rerun"]
-    slow = cost_guard(screened_bundle(calibration, 1.15, "screen"), calibration)
-    assert slow["result"] == "unresolved" and slow["needs_full"] and not slow["needs_rerun"]
-    # A regime the calibration never bootstrapped cannot be judged.
-    with pytest.raises(Incomplete):
-        cost_guard(
-            dict(screened_bundle(calibration, 1.0, "screen"), regime="normal"), calibration
-        )
-    unscreened = calibrate_cost(
-        arms, "timing", {"c": 1}, {"cpu": "test"}, calibration["created_at"],
-        replicates=20, protocol=dict(SCREENED, screen_rounds=0),
-    )
-    assert list(unscreened["regimes"]) == ["normal", "rerun"]
-    stray = dict(screened_bundle(calibration, 1.0, "screen"), calibration_id=unscreened["id"])
-    with pytest.raises(Incomplete):
-        cost_guard(stray, unscreened)
+    # Inside the full band (3%) but outside the screen's half band.
+    near = cost_guard(bundle({"c": 1.02}, "screen"), POLICY, "timing", w)
+    assert near["result"] == "unresolved" and near["needs_full"] and not near["needs_rerun"]
+    assert cost_guard(bundle({"c": 1.02}, "normal"), POLICY, "timing", w)["result"] == "passed"
+    slow = cost_guard(bundle({"c": 1.15}, "screen"), POLICY, "timing", w)
+    assert slow["result"] == "unresolved" and slow["needs_full"]
 
 
 def measured_panel(monkeypatch, tmp_path, ratio):
@@ -189,7 +186,7 @@ def measured_panel(monkeypatch, tmp_path, ratio):
         calls.append((build["id"], job["mode"], directory))
         scale = ratio if build["id"] == "evolved" else 1.0
         return [
-            {"seed": seed, "status": "ok", "samples_ns": [int(80 * scale)]}
+            {"seed": seed, "status": "ok", "samples_ns": [int(10**9 * scale)]}
             for seed in job["seeds"]
         ]
 
@@ -197,33 +194,23 @@ def measured_panel(monkeypatch, tmp_path, ratio):
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     case = {"case_id": "c", "panel": "timing", "timeout_s": 120, "modes": ["timing_e2e"]}
     builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
-    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "replica")}
-    calibration = calibrate_cost(
-        arms, "timing", {"c": 1}, {}, datetime.now(UTC).isoformat(),
-        replicates=20, protocol=SCREENED,
-    )
     run = {"run_id": "run", "machine": {}}
     result = costs.measure_panel(
-        run, builds, [case], "timing", tmp_path / "cost/timing", tmp_path, calibration,
-        SCREENED,
+        run, builds, [case], "timing", tmp_path / "cost/timing", tmp_path, POLICY
     )
-    return result, calls, case, calibration, builds
+    return result, calls, case, builds
 
 
 def test_clear_screen_ends_the_panel_early(monkeypatch, tmp_path):
-    from qtb.canonical import read_json
-
     result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.0)
     assert (result["result"], result["regime"], result["count"]) == ("passed", "screen", 2)
     assert len(calls) == 2 * 2  # screen rounds × arms, nothing more
-    assert (tmp_path / "cost/timing/screen.json").exists()
+    saved = read_json(tmp_path / "cost/timing/screen.json")
+    assert saved["regime"] == "screen" and saved["thresholds_id"] == thresholds_id(POLICY)
     assert not (tmp_path / "cost/timing/normal.json").exists()
-    assert read_json(tmp_path / "cost/timing/screen.json")["regime"] == "screen"
 
 
 def test_unclear_screen_measures_in_full_then_reruns_fresh(monkeypatch, tmp_path):
-    from qtb.canonical import read_json
-
     result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.15)
     assert (result["result"], result["regime"], result["count"]) == ("failed", "rerun", 8)
     assert len(calls) == (2 + 4 + 8) * 2
@@ -238,21 +225,28 @@ def test_replay_accepts_a_clear_screen_and_demands_the_rest_otherwise(monkeypatc
 
     for ratio, expected in ((1.0, "passed"), (1.15, "failed")):
         directory = tmp_path / f"ratio-{ratio}"
-        _, _, case, calibration, builds = measured_panel(monkeypatch, directory, ratio)
-        run = dict(
-            profile="iterations-profile", run_id="run", scope={},
-            calibrations={"cost": {"timing": calibration}}, builds=builds,
-        )
-        replayed = replay_costs(directory, run, {"cases": [case]}, [])
+        _, _, case, builds = measured_panel(monkeypatch, directory, ratio)
+        run = dict(profile="iterations-profile", run_id="run", scope={}, builds=builds)
+        replayed = replay_costs(directory, run, {"cases": [case]}, POLICY, [])
         assert replayed[0]["result"] == expected
         assert replayed[0]["regime"] == ("screen" if ratio == 1.0 else "rerun")
         if ratio == 1.15:
             (directory / "cost/timing/rerun.json").unlink()
-            replayed = replay_costs(directory, run, {"cases": [case]}, [])
+            replayed = replay_costs(directory, run, {"cases": [case]}, POLICY, [])
             assert replayed[0]["result"] == "unresolved"
             (directory / "cost/timing/normal.json").unlink()
-            replayed = replay_costs(directory, run, {"cases": [case]}, [])
+            replayed = replay_costs(directory, run, {"cases": [case]}, POLICY, [])
             assert "Missing normal" in replayed[0]["detail"]
+
+
+def test_replay_refuses_a_pre_threshold_archive(monkeypatch, tmp_path):
+    from qtb.coordinator.costs import replay_costs
+
+    _, _, case, builds = measured_panel(monkeypatch, tmp_path, 1.0)
+    run = dict(profile="iterations-profile", run_id="run", scope={}, builds=builds)
+    legacy = {"measurement_protocol": POLICY["measurement_protocol"]}
+    with pytest.raises(HarnessError, match="pre-version-4"):
+        replay_costs(tmp_path, run, {"cases": [case]}, legacy, [])
 
 
 def test_timing_panel_is_one_process_per_round_and_arm(monkeypatch, tmp_path):
@@ -277,7 +271,7 @@ def test_timing_panel_is_one_process_per_round_and_arm(monkeypatch, tmp_path):
     builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "evolved"))}
     result = costs.collect_panel(
         {"run_id": "r", "machine": {}}, builds, cases, "timing", tmp_path, 3, list(builds),
-        tmp_path, SCREENED,
+        tmp_path, POLICY["measurement_protocol"],
     )
     assert len(calls) == 3 * 2  # rounds × arms, not rounds × arms × cases
     assert len({directory for _, _, directory in calls}) == 6
@@ -322,7 +316,7 @@ def test_companion_batches_seeds_per_arm_round_without_changing_samples(monkeypa
         tmp_path,
         {"warmups": 2, "minimum_calls": 4, "minimum_ns": 250},
     )
-    assert len(calls) == 4  # two rounds × two arms, rather than 120 processes
+    assert len(calls) == 4  # two rounds × two arms, rather than 80 processes
     assert all(
         mode == "timing_reuse" and seeds == tuple(range(20))
         for _, mode, seeds, _, _ in calls
@@ -353,15 +347,15 @@ def test_cost_interleaving_seed_is_derived_from_run_and_archived(monkeypatch, tm
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
     builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
-    protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
+    protocol = POLICY["measurement_protocol"]
 
     def collect(run_id, name):
         order.clear()
-        bundle = costs.collect_panel(
+        result = costs.collect_panel(
             {"run_id": run_id, "machine": {}}, builds, [case], "timing",
             tmp_path / name, 5, list(builds), tmp_path, protocol,
         )
-        return bundle, list(order)
+        return result, list(order)
 
     first, first_order = collect("run-one", "first")
     second, second_order = collect("run-one", "second")
@@ -375,7 +369,6 @@ def test_cost_interleaving_seed_is_derived_from_run_and_archived(monkeypatch, tm
 
 
 def test_incomplete_cost_panel_restarts_all_arms(monkeypatch, tmp_path):
-    from qtb.canonical import read_json, write_json
     from qtb.coordinator import costs
 
     panel = tmp_path / "panel"
@@ -389,14 +382,10 @@ def test_incomplete_cost_panel_restarts_all_arms(monkeypatch, tmp_path):
 
     monkeypatch.setattr(costs, "run_worker", worker)
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
-    monkeypatch.setattr(costs, "cost_guard", lambda *_: {"result": "passed", "needs_rerun": False})
     case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
     builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
-    calibration = {"id": "cal", "regimes": {"normal": {"count": 2}, "rerun": {"count": 4}}}
-    protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
     result = costs.measure_panel(
-        {"run_id": "run", "machine": {}}, builds, [case], "timing", panel,
-        tmp_path, calibration, protocol,
+        {"run_id": "run", "machine": {}}, builds, [case], "timing", panel, tmp_path, UNSCREENED
     )
     saved = read_json(panel / "normal.json")
     assert result["result"] == "passed"
@@ -406,30 +395,30 @@ def test_incomplete_cost_panel_restarts_all_arms(monkeypatch, tmp_path):
 
 
 def test_cost_replay_ignores_claimed_pass_without_fresh_rerun(tmp_path):
-    from qtb.canonical import digest, write_json
     from qtb.coordinator.costs import replay_costs
     from qtb.evaluator import record
 
-    normal, calibration = bundle_and_calibration()
-    case = {"case_id": "c", "panel": "timing"}
-    normal["case_hashes"] = {"c": digest(case)}
+    case = {"case_id": "c", "panel": "timing", "modes": ["timing_e2e"]}
+    normal = dict(bundle({"c": 1.15}, "normal", UNSCREENED), case_hashes={"c": digest(case)})
     run = dict(
         profile="iterations-profile",
         run_id="run",
         scope={},
-        calibrations={"cost": {"timing": calibration}},
         builds={a: {"id": "identical"} for a in ("baseline", "evolved")},
     )
     write_json(tmp_path / "cost/timing/normal.json", normal)
     forged = [record("IA5/timing", "cost", "passed")]
-    result = replay_costs(tmp_path, run, {"cases": [case]}, forged)
+    result = replay_costs(tmp_path, run, {"cases": [case]}, UNSCREENED, forged)
     assert result[0]["result"] == "unresolved"
-    rerun, _ = bundle_and_calibration(regime="rerun")
-    rerun.update(
-        calibration_id=calibration["id"], session_id="fresh", case_hashes=normal["case_hashes"]
+    rerun = dict(
+        bundle({"c": 1.15}, "rerun", UNSCREENED, session="fresh"), case_hashes=normal["case_hashes"]
     )
-    for arm in rerun["arms"].values():
-        arm["session_id"] = "fresh"
     write_json(tmp_path / "cost/timing/rerun.json", rerun)
-    result = replay_costs(tmp_path, run, {"cases": [case]}, forged)
+    result = replay_costs(tmp_path, run, {"cases": [case]}, UNSCREENED, forged)
     assert result[0]["result"] == "failed"
+    stale = dict(rerun, session_id="session")
+    for arm in stale["arms"].values():
+        arm["session_id"] = "session"
+    write_json(tmp_path / "cost/timing/rerun.json", stale)
+    result = replay_costs(tmp_path, run, {"cases": [case]}, UNSCREENED, forged)
+    assert result[0]["result"] == "unresolved" and "fresh session" in result[0]["detail"]

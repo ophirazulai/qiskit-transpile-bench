@@ -120,7 +120,7 @@ from `policy.json`.
 **Why 3·SE for guards.** A profile has many guards. At 2·SE each would reject a neutral
 candidate about 2.3% of the time, and about 45 guards (confirm) would reject a neutral candidate
 most of the time. At 3·SE the per-guard rate is about 0.13%. The real, correlated family-wise
-rate is measured during calibration (below) and printed in the report.
+rate is not measured (section 5).
 
 ### Missing values and zeros
 
@@ -130,21 +130,19 @@ rate is measured during calibration (below) and printed in the report.
   both passed. Otherwise every quality record is `unresolved`.
 - Failures are never dropped from a denominator, and weights are never silently changed.
 
-## 5. False-rejection calibration (quality)
+## 5. No per-machine calibration
 
-Run once per baseline build, profile and machine, then reused for 30 days
-(`coordinator/calibration.py`):
+Earlier versions compiled the baseline on two extra seed blocks to estimate the family-wise
+false-rejection rate of the guards, and timed the baseline against itself to measure the
+machine's cost noise. Version 4 of the profiles removed that phase (see
+[design/remove-calibration-plan.md](../design/remove-calibration-plan.md)):
 
-1. Compile the baseline on the two calibration blocks KB1 (seeds 100–199) and KB2 (200–299).
-2. Pair KB1 against KB2 as a "null comparison": two draws from the same distribution.
-3. Flip the sign of whole seed rows 10,000 times, recompute every guard, and count how often
-   at least one guard trips (`sign_flip_calibration()`).
-4. Combine with the cost panels' null rejection rate: `1 − (1 − p_quality)(1 − p_cost)`.
-   If the combined rate exceeds 10%, `calibration/quality` is `unresolved`.
-
-The same calibration also checks that every deterministic, zero-baseline and canary case really
-gives one constant `(D2, N2)` on all 300 baseline seeds. If one does not, `baseline/preflight`
-fails.
+- The quality guards use their fixed multipliers only. Their combined false-rejection rate on
+  a given runner is not estimated, and the report says so.
+- The cost guards use the fixed thresholds of section 6. Whether they match a runner's noise
+  is checked, if at all, by one manual A/A `compare` (same source as baseline and evolved).
+- Deterministic, zero-baseline and canary constants are checked on the B0 seeds only. A
+  baseline that misses its own constant there gives `INCONCLUSIVE`.
 
 ## 6. Cost: time and memory
 
@@ -169,22 +167,20 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   evolved) run interleaved in random order within each round. Nothing else may run:
   the coordinator takes an exclusive machine lock and refuses to start if the load average is
   above half the core count.
-- **A/A calibration:** the baseline build is measured as two interleaved arms (`baseline`
-  and `replica`), each in its own fresh processes, `calibration_rounds` (30) times each (`calibration_memory_processes` = 10 for memory). 1,000 bootstrap resamples
-  at each regime's sample size give that regime's `noise_panel`, the 95th percentile of
-  `|ln_panel|` floored at `ln(1.01)`, and a per-case absolute noise floor. Calibration refuses
-  to freeze if any regime's `noise_panel` exceeds `ln(1.05)`. Both arms run the same wheel,
-  so the band measures run-to-run machine noise only, not build-to-build variation.
-- **Guard:** a panel breaches if `ln_panel > noise_panel`, or if any case is more than 10%
-  slower **and** slower by more than its noise floor.
-- **Screen:** the screen passes only when the candidate's `ln_panel` is inside the **full**
-  regime's `noise_panel` (the screen's own band is wider) with no per-case breach at the
-  screen's floors. A clear screen is a `passed` panel; anything
-  else discards nothing but proceeds to the full measurement in a fresh session.
-- **One rerun:** if the candidate breaches in the full measurement, the whole panel is measured once more with
-  doubled rounds. A breach again → `failed`; a pass → `passed_on_rerun`.
-- **Null rejection rate:** calibration bootstraps the whole sequence (screen → full → rerun)
-  on the baseline and replica series, so the reported cost false-rejection rate includes the screen.
+- **Thresholds** (`policy.json` → `cost_thresholds`), the same for every runner:
+  `panel_ratio` 1.03, `case_ratio` 1.10, `case_floor_ns` 25 ms, `case_floor_bytes` 32 MiB,
+  `screen_fraction` 0.5. Every cost bundle records the digest of this block
+  (`thresholds_id`), and a bundle judged under different thresholds is `unresolved`.
+- **Guard:** a panel breaches if `ln_panel > ln(panel_ratio)`, or if any case has
+  `ratio > case_ratio` **and** an absolute delta above its floor. The floor keeps jitter on
+  millisecond cases (T1, T2, `preset_build`) from counting as a regression.
+- **Screen:** the screen passes only when the candidate's `ln_panel` is within
+  `screen_fraction × ln(panel_ratio)` with no per-case breach. A clear screen is a `passed`
+  panel; anything else discards nothing but proceeds to the full measurement in a fresh
+  session.
+- **One rerun:** if the candidate breaches in the full measurement, the whole panel is
+  measured once more with doubled rounds. A breach again → `failed`; a pass →
+  `passed_on_rerun`.
 
 Cost is measured only when the improvement test passed and nothing has failed, because it
 needs an exclusive machine and hours of wall time.

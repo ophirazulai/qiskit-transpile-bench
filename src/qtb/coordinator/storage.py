@@ -25,9 +25,6 @@ COST_PROTOCOL_KEYS = {
     "companion_seeds",
     "memory_processes",
     "rerun_multiplier",
-    "calibration_rounds",
-    "calibration_memory_processes",
-    "calibration_expiry_days",
 }
 
 

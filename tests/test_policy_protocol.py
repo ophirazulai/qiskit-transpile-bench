@@ -133,6 +133,19 @@ def test_policy_and_job_reject_invalid_timing_protocol():
     del bad_policy["measurement_protocol"]["screen_rounds"]
     with pytest.raises(HarnessError, match="screen_rounds"):
         validate("policy", bad_policy)
+    for key, value in (("panel_ratio", 1.0), ("screen_fraction", 1.5), ("case_floor_ns", -1)):
+        bad_policy = deepcopy(policy)
+        bad_policy["cost_thresholds"][key] = value
+        with pytest.raises(HarnessError, match=key):
+            validate("policy", bad_policy)
+    bad_policy = deepcopy(policy)
+    bad_policy["cost_thresholds"]["noise_panel"] = 0.03
+    with pytest.raises(HarnessError, match="noise_panel"):
+        validate("policy", bad_policy)
+    bad_policy = deepcopy(policy)
+    del bad_policy["cost_thresholds"]
+    with pytest.raises(HarnessError, match="cost_thresholds"):
+        validate("policy", bad_policy)
 
 
 def test_shipped_profiles_screen_then_measure_at_their_own_full_count():
@@ -143,9 +156,15 @@ def test_shipped_profiles_screen_then_measure_at_their_own_full_count():
         _, policy, _ = load_profile(profile, verify=False)
         protocol = policy["measurement_protocol"]
         assert protocol["minimum_calls"] == 2
-        assert regime_counts("timing", protocol) == (
-            {"screen": 4, "normal": full, "rerun": 2 * full},
-            30,
-        )
-        assert regime_counts("companion", protocol) == ({"normal": 3, "rerun": 6}, 30)
-        assert regime_counts("memory", protocol) == ({"normal": 5, "rerun": 10}, 10)
+        assert not any(key.startswith("calibration") for key in protocol)
+        assert regime_counts("timing", protocol) == {"screen": 4, "normal": full, "rerun": 2 * full}
+        assert regime_counts("companion", protocol) == {"normal": 3, "rerun": 6}
+        assert regime_counts("memory", protocol) == {"normal": 5, "rerun": 10}
+        assert policy["cost_thresholds"] == {
+            "panel_ratio": 1.03,
+            "case_ratio": 1.10,
+            "case_floor_ns": 25_000_000,
+            "case_floor_bytes": 32 * 1024 * 1024,
+            "screen_fraction": 0.5,
+        }
+        assert not any(id_.startswith("calibration/") for id_ in policy["required_ids"])

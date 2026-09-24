@@ -62,7 +62,7 @@ Three rules shape the whole design:
 | Fixtures | `fixtures/` | No | Frozen canonical circuits, targets, semantic references, the C1–C5 correctness suite, provenance and licenses |
 | Canonical IO | `src/qtb/canonical/` | No | Deterministic JSON, hex floats, gzip circuit files, SHA-256 hashing, atomic writes |
 | Environment builder | `src/qtb/envbuild/` | No | Snapshot source folders, build release wheels in isolated venvs, record provenance ([environments.md](environments.md)) |
-| Coordinator | `src/qtb/coordinator/` | No | Run lifecycle, job scheduling, timeouts, caches, determinism audit, calibration, cost sessions, upstream tests |
+| Coordinator | `src/qtb/coordinator/` | No | Run lifecycle, job scheduling, timeouts, caches, determinism audit, cost sessions, upstream tests |
 | Worker | `worker/qtb_worker/` | Yes, the revision under test | Rebuild inputs from canonical data, compile, export outputs, time compiles, measure memory, run live API checks |
 | Metrics | `src/qtb/metrics/` | No | Streaming `D2`/`N2`, target legality (C0), layout validation, exact routing replay (C6) |
 | Verifier | `verifier/qtb_verifier/` | Yes, pinned Qiskit 2.5.2 | Semantic oracles: C1, C2/C1-lite, C3, C5, C7 ([verifier.md](verifier.md)) |
@@ -123,26 +123,22 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
    the frozen hashes. This proves that both revisions compile identical inputs.
 4. **Baseline preflight.** The baseline runs the frozen C1–C5 correctness suite. If the
    baseline itself fails, the run stops with `INCONCLUSIVE`.
-5. **Calibration.** Baseline quality on seed blocks B0, KB1 and KB2, a 300-seed audit of the
-   deterministic roles, and timing/memory A/A calibration. Results are stored in
-   `results/calibrations/<key>/` and reused for 30 days by any run with the same baseline
-   build, profile, machine and harness code.
-6. **Evolved correctness:** the C1–C5 suite, C7 Clifford variants, and the upstream Python and
+5. **Evolved correctness:** the C1–C5 suite, C7 Clifford variants, and the upstream Python and
    Rust tests. If any check fails, the run stops and writes the decision.
-7. **Quality:** every non-timing case of the profile, for both revisions, on seed block B0.
+6. **Quality:** every non-timing case of the profile, for both revisions, on seed block B0.
    Each output gets C0 (structure) and, where applicable, C6 (routing replay) and C1-lite
    (confirm profile). Baseline observations come from the quality cache when possible.
-8. **Determinism audit.** At least 5% (minimum 10) of observations are recompiled, half of
+7. **Determinism audit.** At least 5% (minimum 10) of observations are recompiled, half of
    them with a different `PYTHONHASHSEED`, and must reproduce identical outputs.
-9. **Cost:** timing and memory panels, measured only if the improvement test passed and
+8. **Cost:** timing and memory panels, measured only if the improvement test passed and
    nothing has failed. The two arms (baseline, evolved) are interleaved in random
    order, each round in a fresh process per arm. A short screen ends a clearly clean panel
    early; otherwise the panel is measured in full and, on a candidate-only breach, rerun once.
-10. **Decision.** The evaluator combines all records into a verdict. The reporter writes
+9. **Decision.** The evaluator combines all records into a verdict. The reporter writes
     `decision.json` and `report.md`, and the decision is counted in
     `results/decision-counts.json`.
 
-`smoke` runs only steps 1–3 and a one-seed version of step 7 (see the README).
+`smoke` runs only steps 1–3 and a one-seed version of step 6 (see the README).
 
 ## Caches and shared state in the results root
 
@@ -150,7 +146,6 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
 | --- | --- | --- |
 | `results/build-cache/<slot>/<identity>/` | Built Qiskit wheels, one slot each for baseline and evolved | Same source tree hash, Python, locks, Rust toolchain, C compilers, build flags, OS and architecture |
 | `results/quality-cache/<key>/` | Per-seed quality observations and their output files | Same build, case definition, CPU model, worker protocol, harness implementation, measurement protocol, seed block |
-| `results/calibrations/<key>/` | Quality false-rejection and cost A/A calibrations | Same baseline build, manifest, policy, machine and calibration code; expires after 30 days |
 | `results/decision-counts.json` | Every decision per manifest hash | Always appended; shows how often a profile has been used |
 | `results/qualifications/<hash>.json` | Maintainer attestation that a run's configuration is qualified | Written by hand; see [implementation-status.md](implementation-status.md) |
 
@@ -170,9 +165,8 @@ src/qtb/
   envbuild/           snapshot, build, provenance
   coordinator/
     __init__.py       Comparison: lifecycle, quality, audit, routing replay, aggregation
-    calibration.py    preflight, quality/cost calibration, role freeze
     checks.py         C1–C5 behavior suite, API checks, C7 Clifford checks
-    costs.py          interleaved two-arm cost sessions
+    costs.py          panel selection by scope, interleaved two-arm cost sessions, thresholds
     upstream.py       baseline-owned Python tests and Rust tests
     process.py        worker subprocess with heartbeats and timeouts
     storage.py        locks, JSONL records, caches, output pruning

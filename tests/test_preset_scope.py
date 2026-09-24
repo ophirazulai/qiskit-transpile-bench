@@ -1,12 +1,21 @@
-from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from qtb.canonical import digest, write_json
 from qtb.config import STAGES
-from qtb.coordinator.calibration import measure_costs, preflight, required_cost_panels
-from qtb.coordinator.costs import replay_costs
+from qtb.coordinator.costs import cost_panels, measure_costs, replay_costs, required_cost_panels
 from qtb.errors import Incomplete
 from qtb.evaluator import record, verdict
+
+POLICY = {
+    "measurement_protocol": {"screen_rounds": 0, "timing_rounds": 2, "rerun_multiplier": 2},
+    "cost_thresholds": {
+        "panel_ratio": 1.03,
+        "case_ratio": 1.10,
+        "case_floor_ns": 25_000_000,
+        "case_floor_bytes": 33_554_432,
+        "screen_fraction": 0.5,
+    },
+}
 
 
 def comparison(scope, paths=()):
@@ -30,10 +39,8 @@ def scoped(stages, unmapped=(), profile="iterations-profile"):
 
 
 def test_basis_twins_and_companion_follow_the_change_scope():
-    from qtb.coordinator.calibration import cost_panels
-
-    def names(comparison, **kwargs):
-        panels = cost_panels(comparison, **kwargs)
+    def names(comparison):
+        panels = cost_panels(comparison)
         return {name: [c["case_id"] for c in cases] for name, (cases, _) in panels.items()}
 
     routing = names(scoped(["layout", "routing"]))
@@ -48,7 +55,6 @@ def test_basis_twins_and_companion_follow_the_change_scope():
     assert {"timing-basis", "companion", "preset"} <= set(unknown)
     everything = names(scoped(list(STAGES)))
     assert {"timing-basis", "companion"} <= set(everything)
-    assert set(names(scoped(["scheduling"]), all_panels=True)) == set(everything)
     # Whatever is measured under a relevant scope is guarded.
     assert "timing-basis" in required_cost_panels(scoped(["translation"]))
     assert "companion" in required_cost_panels(scoped(["routing"]))
@@ -71,11 +77,7 @@ def test_replayed_preset_breach_is_report_only_when_scope_is_unrelated(tmp_path,
     comparison_ = comparison({"stages": ["init", "optimization"], "unmapped_paths": []})
     case = comparison_.manifest["cases"][1]
     run = comparison_.run
-    run.update(
-        run_id="run",
-        builds={arm: {"id": "build"} for arm in ("baseline", "evolved")},
-        calibrations={"cost": {"preset": {}}},
-    )
+    run.update(run_id="run", builds={arm: {"id": "build"} for arm in ("baseline", "evolved")})
     write_json(
         tmp_path / "cost/preset/normal.json",
         {
@@ -89,34 +91,36 @@ def test_replayed_preset_breach_is_report_only_when_scope_is_unrelated(tmp_path,
         "qtb.coordinator.costs.cost_guard",
         lambda *_args, **_kwargs: {"result": "failed", "needs_rerun": True},
     )
-    evidence = replay_costs(tmp_path, run, {"cases": [case]}, [])
+    evidence = replay_costs(tmp_path, run, {"cases": [case]}, POLICY, [])
     assert evidence[0]["result"] == "not_evaluated"
     assert evidence[0]["observed_result"] == "failed"
     assert verdict([record("IA2/improvement", "improvement", "passed"), *evidence],
                    ["IA2/improvement"]) == "PASS"
 
 
-def test_unrelated_preset_is_still_measured_and_recorded(tmp_path, monkeypatch):
+def prepared(tmp_path):
     comparison_ = comparison({"stages": ["init", "optimization"], "unmapped_paths": []})
-    comparison_.run.update(
-        calibrations={"cost": {"timing": {}, "preset": {}}}, builds={}
-    )
-    comparison_.policy = {"measurement_protocol": {}}
-    comparison_.directory = tmp_path
-    comparison_.fixtures = tmp_path
+    comparison_.run.update(builds={})
+    comparison_.policy = POLICY
+    comparison_.directory = comparison_.fixtures = tmp_path
     comparison_.prefix = "IA"
     comparison_.progress = lambda *_: None
     comparison_.records = []
     comparison_.evidence = comparison_.records.append
+    return comparison_
+
+
+def test_unrelated_preset_is_still_measured_and_recorded(tmp_path, monkeypatch):
+    comparison_ = prepared(tmp_path)
     measured = []
 
-    def fake_measure(_run, _builds, cases, _estimator, _directory, _fixtures, _calibration,
-                     _protocol,
+    def fake_measure(_run, _builds, cases, _estimator, _directory, _fixtures, policy,
                      guarded=True):
+        assert policy is POLICY
         measured.append((cases[0]["panel"], guarded))
         return {"result": "failed", "needs_rerun": True}
 
-    monkeypatch.setattr("qtb.coordinator.calibration.measure_panel", fake_measure)
+    monkeypatch.setattr("qtb.coordinator.costs.measure_panel", fake_measure)
     measure_costs(comparison_)
     assert measured == [("timing", True), ("preset", False)]
     preset = next(row for row in comparison_.records if row["id"] == "IA5/preset")
@@ -125,51 +129,15 @@ def test_unrelated_preset_is_still_measured_and_recorded(tmp_path, monkeypatch):
 
 
 def test_unrelated_preset_measurement_failure_does_not_block(tmp_path, monkeypatch):
-    comparison_ = comparison({"stages": ["init", "optimization"], "unmapped_paths": []})
-    comparison_.run.update(calibrations={"cost": {"timing": {}, "preset": {}}}, builds={})
-    comparison_.policy = {"measurement_protocol": {}}
-    comparison_.directory = comparison_.fixtures = tmp_path
-    comparison_.prefix = "IA"
-    comparison_.progress = lambda *_: None
-    comparison_.records = []
-    comparison_.evidence = comparison_.records.append
+    comparison_ = prepared(tmp_path)
 
     def fake_measure(_run, _builds, cases, *_args, **_kwargs):
         if cases[0]["panel"] == "preset":
             raise Incomplete("measurement unavailable")
         return {"result": "passed", "needs_rerun": False}
 
-    monkeypatch.setattr("qtb.coordinator.calibration.measure_panel", fake_measure)
+    monkeypatch.setattr("qtb.coordinator.costs.measure_panel", fake_measure)
     measure_costs(comparison_)
     preset = next(row for row in comparison_.records if row["id"] == "IA5/preset")
     assert preset["result"] == "not_evaluated"
     assert preset["observed_result"] == "unresolved"
-
-
-def test_cached_calibration_ignores_report_only_preset_failure(tmp_path, monkeypatch):
-    comparison_ = comparison({"stages": ["init", "optimization"], "unmapped_paths": []})
-    comparison_.root = tmp_path
-    comparison_.records = []
-    comparison_.save = lambda: None
-    comparison_.evidence = comparison_.records.append
-    monkeypatch.setattr("qtb.coordinator.calibration.calibration_key", lambda _: "key")
-    write_json(
-        tmp_path / "calibrations/key/summary.json",
-        {
-            "created_at": datetime.now(UTC).isoformat(),
-            "quality": {
-                "false_rejection_rate": 0.0,
-                "noisy_guard_count": 0,
-                "freeze_allowed": True,
-                "role_failures": [],
-            },
-            "cost": {
-                "timing": {"null_rejections": [False], "freeze_allowed": True},
-                "preset": {"null_rejections": [True], "freeze_allowed": False},
-            },
-            "false_rejection": {"freeze_allowed": False},
-        },
-    )
-    summary = preflight(comparison_, [])
-    assert summary["false_rejection"]["freeze_allowed"] is True
-    assert {row["id"]: row["result"] for row in comparison_.records}["calibration/cost"] == "passed"

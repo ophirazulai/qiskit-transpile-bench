@@ -87,7 +87,7 @@ verdict.
 It builds the baseline and evolved release wheels and round-trips the
 quality cases. It then compiles each non-timing, non-memory case with seed 0 only for both
 revisions, and runs only the structural legality and metrics check on each output. It skips
-the correctness suites, calibration, routing replay, semantic oracles, the quality cache and
+the correctness suites, routing replay, semantic oracles, the quality cache and
 cost measurement.
 
 `compare` does not depend on a smoke run and covers everything smoke does. Use smoke on a new
@@ -138,7 +138,7 @@ Options for `compare` and `smoke`:
 | --- | --- |
 | `--baseline PATH`, `--evolved PATH` | The two Qiskit source folders (required) |
 | `--profile NAME` | `iterations-profile` (default) or `confirm-profile` |
-| `--results-root DIR` | Where runs, caches and calibrations go (default `results/`) |
+| `--results-root DIR` | Where runs and caches go (default `results/`) |
 | `--resume RUN_DIRECTORY` | Continue an interrupted run with its archived snapshots, manifest and policy. Requires the same harness version; install the archived harness wheel to resume an older run |
 | `--change-scope scope.json` | Declare extra changed stages, for example `{"stages": ["optimization"]}`. This can only widen the scope inferred from the changed files; unknown paths already count as all stages |
 
@@ -155,7 +155,7 @@ for details.
 | Confirm quality compiles | About 3.5 CPU-hours for the candidate once the baseline is cached |
 | Cost panels, iterations | One round (2 arms × 16 cases) is about 1.5 min. Typical: the 4-round screen, about 6–7 min. Worst: screen + 6-round full measurement + 12-round rerun = 22 rounds, about 35 min. Add about 10–20 min for the multi-seed companion when the change touches layout or routing |
 | Cost panels, confirm | One round (2 arms × 36 cases) is about 3.5 min. Typical: the 4-round screen (about 14 min) plus memory (about 10 min), about 25 min. Worst: screen + 10-round full + 20-round rerun = 34 rounds, about 2 h, plus a memory rerun |
-| First `compare` against a new baseline | Also pays for calibration and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days. Calibration compiles the baseline on two extra seed blocks (about 25 CPU-min for iterations, about 3 CPU-h for confirm) and times the baseline against itself for 30 rounds on every cost panel: about 1 h for the batched timing panels, plus the multi-seed companion at 30 rounds per seed (about 2–6 h for iterations, more for confirm), which dominates |
+| First `compare` against a new baseline | Also pays for the baseline's upstream tests (budgets of 4 h Python and 3 h Rust). There is no calibration step: the cost thresholds are fixed in `policy.json`, and the baseline's quality compiles are cached for later runs |
 
 Cost panels are estimates from the design probes, not measured runs: no full comparison with
 cost measurement has been recorded yet. They run only after the quality test has passed, on an
@@ -166,19 +166,29 @@ candidate's compile time already sits inside the noise band of the full measurem
 single case is more than 10% slower), the panel stops there. Otherwise it is measured in full
 (6 rounds in the iterations profile, 10 in confirm) and, on a candidate-only breach, once more
 with doubled rounds. Every round is one fresh process per arm that times the whole panel, so
-Python and Qiskit start-up is paid 3 times per round instead of once per case. The `cx`/`ecr`
+Python and Qiskit start-up is paid twice per round instead of once per case. The `cx`/`ecr`
 twins of the scored circuits are timed only when the change can reach translation or
 optimization, since they repeat the `cz` cases' layout and routing. See
 [iterations-profile.md](docs/iterations-profile.md#timing-panels) and
 [metrics.md](docs/metrics.md#6-cost-time-and-memory).
+
+**Cost thresholds are fixed, not calibrated.** A panel fails when the candidate is more than
+3% slower overall (`panel_ratio`), or when any single case is more than 10% slower *and*
+slower by more than 25 ms (32 MiB for memory), so jitter on millisecond cases never counts.
+The screen must clear half of the 3% band. These numbers come from the design probe on an
+idle M1 Max; the harness never measures your machine's own noise. To check them on a new
+runner, run `compare` with the same source folder as both `--baseline` and `--evolved` once:
+the quality panel is an exact tie, and the cost rows of `report.md` show how far two
+independent builds of the same code drift apart. If that drift is more than about 2% (six
+tenths of the band), raise `panel_ratio` in a new policy version rather than trusting cost
+failures on that machine.
 
 Disk: about 2 GB per built revision, 5–7 GB per run. Run directories are never deleted
 automatically.
 
 ## Reproducibility guarantees
 
-- Every quality panel uses seeds 0–99 (block B0). Calibration uses separate baseline blocks
-  100–199 and 200–299.
+- Every quality panel uses seeds 0–99 (block B0).
 - Workers run serially (`QISKIT_PARALLEL=FALSE`, one Rust and BLAS thread, `PYTHONHASHSEED=0`),
   and a determinism audit recompiles a sample to prove outputs are reproducible.
 - Quality results are cached by build, case definition, machine, harness and measurement
@@ -197,7 +207,7 @@ automatically.
 | [Architecture](docs/architecture.md) | Components, trust boundaries, process model, run lifecycle, caches, source layout |
 | [Iterations profile](docs/iterations-profile.md) | The default workload, acceptance rules IA1–IA6, statistical power, budget |
 | [Confirm profile](docs/confirm-profile.md) | The broad workload, families and weights, rules CA1–CA6, report-only numbers |
-| [Metrics](docs/metrics.md) | `D2`/`N2`, scores and paired standard errors, guards, cost estimators, calibration, stage coverage, verdict |
+| [Metrics](docs/metrics.md) | `D2`/`N2`, scores and paired standard errors, guards, cost estimators and thresholds, stage coverage, verdict |
 | [Verifier](docs/verifier.md) | The pinned semantic oracle and every correctness check (C0–C7, C1-lite, upstream tests) |
 | [Environments](docs/environments.md) | `envs/` lock files, how builds work, where they live, build time and disk use, troubleshooting |
 | [Output format](docs/output-format.md) | Run directory, `decision.json`, `report.md`, `smoke.json`, observations, circuit files |

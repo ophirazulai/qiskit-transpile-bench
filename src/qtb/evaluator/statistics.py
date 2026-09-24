@@ -160,32 +160,3 @@ def cluster_bootstrap(cases, panel, replicates=10000, rng_seed=20260924):
     }
 
 
-def sign_flip_calibration(guards, replicates=10000, rng_seed=20260924, multiplier=3.0):
-    """Each guard has seed deltas and optional log cap; flip entire seed rows."""
-    if not guards or any(len(g["deltas"]) < 2 for g in guards):
-        raise HarnessError("Calibration requires a complete guard set")
-    n = max(len(g["deltas"]) for g in guards)
-    rng, failures = random.Random(rng_seed), 0
-    for _ in range(replicates):
-        signs = [rng.choice((-1, 1)) for _ in range(n)]
-        failed = False
-        for guard in guards:
-            result = estimate(
-                [s * d for s, d in zip(signs[: len(guard["deltas"])], guard["deltas"], strict=True)]
-            )
-            if (
-                guard.get("se_guard", True) and result["ln_score"] > multiplier * result["SE"]
-            ) or result["ln_score"] > guard.get("ln_cap", math.inf):
-                failed = True
-        failures += failed
-    rate = failures / replicates
-    return {
-        "false_rejection_rate": rate,
-        "monte_carlo_SE": math.sqrt(rate * (1 - rate) / replicates),
-        "replicates": replicates,
-        "rng_seed": rng_seed,
-        "noisy_guard_count": sum(
-            g.get("se_guard", True) and estimate(g["deltas"])["SE"] > 0 for g in guards
-        ),
-        "freeze_allowed": rate <= 0.1,
-    }

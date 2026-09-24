@@ -1,4 +1,4 @@
-"""Exclusive, interleaved fresh cost sessions and estimator-matched calibration."""
+"""Exclusive, interleaved fresh two-arm cost sessions judged by policy thresholds."""
 
 import os
 import random
@@ -7,18 +7,90 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qtb.canonical import digest, read_json, write_json
+from qtb.config import STAGES
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.storage import locked, runner_lock
-from qtb.errors import Incomplete
+from qtb.errors import HarnessError, Incomplete
+from qtb.evaluator import record
 from qtb.evaluator.cost import (
-    CALIBRATION_ARMS,
     MEASURED_ARMS,
-    calibrate_cost,
     cost_guard,
     regime_counts,
+    thresholds_id,
+    validate_bundle,
 )
 
 REGIMES = ("screen", "normal", "rerun")
+
+
+def unknown_scope(comparison):
+    """A change that maps to every stage, or to unmapped paths, could affect anything."""
+    return any(
+        set(value["stages"]) == set(STAGES) or value.get("unmapped_paths")
+        for value in comparison.run["scope"].values()
+    )
+
+
+def cost_panels(comparison):
+    """Cost panels to measure for this comparison's change scope.
+
+    ``timing``, ``confirm-timing``, ``memory`` and ``preset`` are always measured.
+    ``timing-basis`` (the cx/ecr twins of the scored circuits) is measured only
+    when the change can reach translation or optimization, since it repeats the
+    cz cases' layout and routing. The multi-seed ``companion`` is measured only
+    when the change can reach layout or routing.
+    """
+    cases = comparison.manifest["cases"]
+    panels = {
+        name: (
+            [c for c in cases if c.get("panel") == name],
+            "memory" if name == "memory" else "timing",
+        )
+        for name in ("timing", "timing-basis", "preset", "confirm-timing", "memory")
+    }
+    panels = {name: pair for name, pair in panels.items() if pair[0]}
+    scope = {s for value in comparison.run["scope"].values() for s in value["stages"]}
+    unknown = unknown_scope(comparison)
+    if not unknown and not scope & {"translation", "optimization"}:
+        panels.pop("timing-basis", None)
+    if unknown or scope & {"layout", "routing"}:
+        if comparison.run["profile"] == "confirm-profile":
+            groups = {
+                c["input_group"]
+                for c in cases
+                if c.get("panel") == "memory" and c["input_group"] != "multiplier_h18_n20"
+            }
+            companion = [
+                next(
+                    c
+                    for c in cases
+                    if c["input_group"] == group
+                    and c["role"] == "scored"
+                    and c["optimization_level"] == 2
+                )
+                for group in sorted(groups)
+            ]
+        else:
+            companion = [
+                c for c in cases if c.get("panel") == "timing" and c["modes"] == ["timing_reuse"]
+            ]
+        panels["companion"] = (companion, "companion")
+    return panels
+
+
+def required_cost_panels(comparison):
+    """The preset panel is measured always, but guarded for relevant or unknown scope."""
+    panels = cost_panels(comparison)
+    preset_scope = unknown_scope(comparison)
+    changed_paths = (
+        path.lower().replace("\\", "/") for path in comparison.run.get("changed_paths", [])
+    )
+    preset_paths = any(
+        "preset_passmanager" in path or "/target" in path for path in changed_paths
+    )
+    if not preset_scope and not preset_paths:
+        panels.pop("preset", None)
+    return panels
 
 
 def interleaving_seed(run_id, cases, estimator, count, arms):
@@ -188,54 +260,24 @@ def panel_weights(cases, estimator):
     }
 
 
-def calibrate_panel(run, builds, cases, estimator, directory, fixture_root, measurement_protocol):
-    _, collected = regime_counts(estimator, measurement_protocol)
-    bundle = collect_panel(
-        run,
-        {arm: builds["baseline"] for arm in CALIBRATION_ARMS},
-        cases,
-        estimator,
-        directory,
-        collected,
-        list(CALIBRATION_ARMS),
-        fixture_root,
-        measurement_protocol,
-    )
-    raw = {arm: data["samples"] for arm, data in bundle["arms"].items()}
-    calibration = calibrate_cost(
-        raw,
-        estimator,
-        panel_weights(cases, estimator),
-        run["machine"],
-        bundle["measured_at"],
-        protocol=measurement_protocol,
-    )
-    write_json(Path(directory) / "raw.json", bundle)
-    write_json(Path(directory) / "calibration.json", calibration)
-    return calibration
-
-
-def measure_panel(
-    run, builds, cases, estimator, directory, fixture_root, calibration,
-    measurement_protocol, guarded=True,
-):
+def measure_panel(run, builds, cases, estimator, directory, fixture_root, policy, guarded=True):
     """Screen, then measure in full, then rerun once; each regime a fresh session.
 
     A clear screen ends the panel early. A report-only panel never pays for a
     rerun, but does complete the full measurement when its screen is unclear.
     """
+    protocol = policy["measurement_protocol"]
+    weights = panel_weights(cases, estimator)
+    counts = regime_counts(estimator, protocol)
     results = []
-    for regime in (r for r in REGIMES if r in calibration["regimes"]):
+    for regime in (r for r in REGIMES if r in counts):
         if regime == "rerun" and not guarded:
             break
-        count = calibration["regimes"][regime]["count"]
         saved = Path(directory) / f"{regime}.json"
         bundle = read_json(saved) if saved.exists() else None
         if bundle is not None:
             try:
-                from qtb.evaluator.cost import validate_bundle
-
-                validate_bundle(bundle, calibration, run["run_id"], historical=False)
+                validate_bundle(bundle, policy, estimator, weights, run["run_id"])
             except Incomplete:
                 bundle = None
         if bundle is None:
@@ -245,14 +287,14 @@ def measure_panel(
                 cases,
                 estimator,
                 Path(directory) / regime,
-                count,
+                counts[regime],
                 list(MEASURED_ARMS),
                 fixture_root,
-                measurement_protocol,
+                protocol,
             )
-            bundle.update(regime=regime, calibration_id=calibration["id"])
+            bundle.update(regime=regime, thresholds_id=thresholds_id(policy))
         write_json(saved, bundle)
-        result = cost_guard(bundle, calibration, run["run_id"])
+        result = cost_guard(bundle, policy, estimator, weights, run["run_id"])
         results.append(result)
         if regime == "screen" and result.get("needs_full"):
             continue
@@ -262,20 +304,58 @@ def measure_panel(
     return results[-1]
 
 
-def replay_costs(directory, run, manifest, evidence):
+def measure_costs(comparison):
+    guarded = required_cost_panels(comparison)
+    for name, (cases, estimator) in cost_panels(comparison).items():
+        comparison.progress(f"Measuring {name}: fresh interleaved baseline/evolved arms.")
+        try:
+            result = measure_panel(
+                comparison.run,
+                comparison.run["builds"],
+                cases,
+                estimator,
+                comparison.directory / "cost" / name,
+                comparison.fixtures,
+                comparison.policy,
+                guarded=name in guarded,
+            )
+        except Incomplete as exc:
+            if name in guarded:
+                raise
+            comparison.evidence(
+                record(
+                    f"{comparison.prefix}5/{name}",
+                    "cost",
+                    "not_evaluated",
+                    observed_result="unresolved",
+                    detail=str(exc),
+                )
+            )
+            continue
+        details = {k: v for k, v in result.items() if k != "result"}
+        if name not in guarded:
+            details["observed_result"] = result["result"]
+        comparison.evidence(
+            record(
+                f"{comparison.prefix}5/{name}",
+                "cost",
+                result["result"] if name in guarded else "not_evaluated",
+                **details,
+            )
+        )
+
+
+def replay_costs(directory, run, manifest, policy, evidence):
     """Recompute complete cost decisions from raw bundles, never cached verdicts."""
     from types import SimpleNamespace
 
-    from qtb.coordinator.calibration import cost_panels, required_cost_panels
-    from qtb.evaluator import record
-
-    if not run.get("calibrations") or "scope" not in run:
+    if "scope" not in run:
         return evidence
     prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
     evidence = list(evidence)
     comparison = SimpleNamespace(run=run, manifest=manifest)
     guarded = required_cost_panels(comparison)
-    for name, (cases, _estimator) in cost_panels(comparison).items():
+    for name, (cases, estimator) in cost_panels(comparison).items():
         id_ = f"{prefix}5/{name}"
         path = Path(directory) / "cost" / name
         bundles = {r: path / f"{r}.json" for r in REGIMES}
@@ -283,11 +363,22 @@ def replay_costs(directory, run, manifest, evidence):
             r["id"] == id_ for r in evidence
         ):
             continue
-        calibration = run["calibrations"]["cost"][name]
+        if "cost_thresholds" not in policy:
+            raise HarnessError(
+                "Archived policy has no cost_thresholds (a pre-version-4 run); "
+                "re-evaluate it with the harness wheel archived in that run"
+            )
+        weights = panel_weights(cases, estimator)
+        counts = regime_counts(estimator, policy["measurement_protocol"])
         try:
 
             def check(
-                regime, previous=None, cases=cases, calibration=calibration, bundles=bundles
+                regime,
+                previous=None,
+                cases=cases,
+                bundles=bundles,
+                weights=weights,
+                estimator=estimator,
             ):
                 if not bundles[regime].exists():
                     raise Incomplete(f"Missing {regime} cost bundle")
@@ -303,10 +394,10 @@ def replay_costs(directory, run, manifest, evidence):
                     for a in MEASURED_ARMS
                 ):
                     raise Incomplete("Cost bundle build identities changed")
-                return bundle, cost_guard(bundle, calibration, run["run_id"], historical=True)
+                return bundle, cost_guard(bundle, policy, estimator, weights, run["run_id"])
 
             previous = None
-            if "screen" in calibration.get("regimes", {}):
+            if "screen" in counts:
                 previous, result = check("screen")
                 if result["needs_full"]:
                     previous, result = check("normal", previous)

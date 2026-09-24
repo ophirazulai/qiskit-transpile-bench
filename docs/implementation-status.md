@@ -15,11 +15,10 @@ not measurements of an evolved Qiskit revision.
 - Streaming structural metrics and legality, ordered connectivity, full layout validation,
   exact routing replay including permutations removed by init.
 - Paired log estimators, quality caps, exact and zero-baseline guards, family/level summaries,
-  confirm breadth, leave-iterations-out reporting, family cluster bootstrap, and sign-flip
-  calibration. The verdict procedure preserves candidate-failure precedence.
-- Estimator-specific A/A cost calibration, fresh two-arm sessions, independent arm IDs,
-  separately calibrated doubled-count reruns, calibration expiry, archived bundles, and
-  combined quality/cost false-rejection calibration.
+  confirm breadth, leave-iterations-out reporting, and family cluster bootstrap. The verdict
+  procedure preserves candidate-failure precedence.
+- Fixed policy cost thresholds, fresh two-arm sessions, independent arm IDs, screened and
+  doubled-count rerun regimes, and archived bundles replayable from the archived policy.
 - Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable run
   evidence, wheel and quality caches, determinism audits, and reports generated from
   quality and cost observations.
@@ -28,8 +27,8 @@ not measurements of an evolved Qiskit revision.
   worker API contracts and negative configuration checks.
 - Curated iterations and confirm workloads, frozen semantic references for Trotter inputs,
   Clifford variants, explicit license/provenance records, and reproducible curation tools.
-- All-300-seed baseline role audits, C1-lite eligibility based on the reference/output union,
-  and binding baseline-owned test execution.
+- C1-lite eligibility based on the reference/output union, and binding baseline-owned test
+  execution.
 - One-pass structural metrics/hash/legality, successful-output pruning above 8 MB,
   runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
@@ -57,8 +56,9 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
 
 ## Qualification work that requires a runner and review
 
-1. Run both baseline builds, the complete correctness suite, B0/KB1/KB2 quality collection,
-   all cost calibrations, and the known-outcome mutations on the intended runner. Review
+1. Run both builds, the complete correctness suite, B0 quality collection, one A/A `compare`
+   to check the fixed cost thresholds against the runner's own drift, and the known-outcome
+   mutations on the intended runner. Review
    every proposed deterministic/canary role against the measured baseline; draft probe facts
    are not sufficient. The replacement reversible circuits require fresh measurements.
    Before qualification, use `tools/freeze_timeouts.py measure` against the baseline build

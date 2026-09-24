@@ -81,8 +81,6 @@ def policy(profile):
     required = [
         "harness/roundtrip",
         "harness/qualification",
-        "calibration/quality",
-        "calibration/cost",
         "baseline/preflight",
         "audit/determinism",
         f"{prefix}1/C0",
@@ -100,7 +98,7 @@ def policy(profile):
     return dict(
         format="qtb-policy/1",
         profile=profile,
-        version=3,
+        version=4,
         required_ids=required,
         quality_prerequisites=["harness/roundtrip", "audit/determinism"],
         practical_ratio=0.99 if prefix == "CA" else 1.0,
@@ -111,7 +109,6 @@ def policy(profile):
         bootstrap_replicates=10000,
         iterations_groups=ITERATIONS,
         measurement_protocol=dict(
-            seed_blocks={"B0": [0, 100], "KB1": [100, 200], "KB2": [200, 300]},
             quality_batch_size=25,
             # Timing: a 4-round screen ends a clearly clean panel early; the full
             # count is 6 rounds in the iterations loop and 10 in confirm.
@@ -123,13 +120,19 @@ def policy(profile):
             companion_seeds=list(range(20)),
             companion_rounds=3,
             memory_processes=5,
-            calibration_rounds=30,
-            calibration_memory_processes=10,
             rerun_multiplier=2,
-            calibration_expiry_days=30,
             audit_fraction=0.05,
             audit_minimum=10,
             output_retention_bytes=8 * 1024 * 1024,
+        ),
+        # Fixed cost guards; there is no per-machine calibration. See
+        # design/remove-calibration-plan.md for how to sanity-check them on a runner.
+        cost_thresholds=dict(
+            panel_ratio=1.03,
+            case_ratio=1.10,
+            case_floor_ns=25_000_000,
+            case_floor_bytes=32 * 1024 * 1024,
+            screen_fraction=0.5,
         ),
         tolerances=dict(operator_rtol=1e-7, operator_atol=1e-8, state_atol=1e-8),
         qualification=dict(
@@ -458,7 +461,7 @@ def curate(source, root=ROOT):
         manifest = dict(
             format="qtb-manifest/1",
             profile=profile,
-            version=3,
+            version=4,
             cases=cases,
             status="unqualified",
             coverage_gaps=[

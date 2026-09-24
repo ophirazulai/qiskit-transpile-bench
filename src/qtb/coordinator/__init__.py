@@ -78,10 +78,8 @@ def structural_result(
     return result
 
 
-def routing_replay_seeds(case, seeds, block="B0"):
+def routing_replay_seeds(case, seeds):
     """C6 scope: scored/basis panels in full, static case guards on ten B0 seeds."""
-    if block != "B0":
-        return []
     if case["role"] == "scored" or (
         case["role"] == "guard" and case.get("panel") in {"basis-cx", "basis-ecr"}
     ):
@@ -365,8 +363,8 @@ class Comparison:
         except HarnessError as exc:
             return {"status": "unverified", "oracle": oracle, "detail": str(exc)}
 
-    def quality(self, cases, smoke=False, block="B0", revisions=("baseline", "evolved")):
-        offsets = {"B0": 0, "KB1": 100, "KB2": 200}
+    def quality(self, cases, smoke=False, revisions=("baseline", "evolved")):
+        block = "B0"
         builds = self.run["builds"]
         independent_aa = (
             "baseline" in builds
@@ -378,12 +376,12 @@ class Comparison:
         completed = {(r["case_id"], r["revision"], r["seed"], r["seed_block"]) for r in saved}
         for revision in revisions:
             for index, case in enumerate(cases):
-                self.progress(f"{revision}: {case['case_id']} ({index + 1}/{len(cases)}, {block})")
+                self.progress(f"{revision}: {case['case_id']} ({index + 1}/{len(cases)})")
                 target = read_json(self.fixtures / case["target"]["file"])
                 count = 1 if smoke else case["seeds_per_block"]
                 seeds = [
                     s
-                    for s in range(offsets[block], offsets[block] + count)
+                    for s in range(count)
                     if (case["case_id"], revision, s, block) not in completed
                 ]
                 key = quality_cache_key(
@@ -392,7 +390,6 @@ class Comparison:
                     self.run["machine"],
                     self.policy["measurement_protocol"],
                     self.run["hashes"]["implementation"],
-                    block,
                 )
                 cache = self.root / "quality-cache" / key
                 if use_cache:
@@ -431,10 +428,7 @@ class Comparison:
                     rows = self.job(revision, case, "quality", batch)
                     prefixes = (
                         self.routing_batch(
-                            revision,
-                            case,
-                            [r["seed"] for r in rows if r["status"] == "ok"],
-                            block,
+                            revision, case, [r["seed"] for r in rows if r["status"] == "ok"]
                         )
                         if not smoke
                         else {}
@@ -531,8 +525,8 @@ class Comparison:
                             cache_quality_observation(cache, result["seed"], observation)
         return read_records(self.directory / "observations.jsonl")
 
-    def routing_batch(self, revision, case, seeds, block="B0"):
-        seeds = routing_replay_seeds(case, seeds, block)
+    def routing_batch(self, revision, case, seeds):
+        seeds = routing_replay_seeds(case, seeds)
         if not seeds:
             return {}
         initial = self.job(revision, case, "prefix", seeds, [f"drop_stage:{s}" for s in STAGES[1:]])
@@ -543,7 +537,7 @@ class Comparison:
 
     def check_routing(self, revision, case, observation, prefixes):
         seed = observation["seed"]
-        if not routing_replay_seeds(case, [seed], observation.get("seed_block", "B0")):
+        if not routing_replay_seeds(case, [seed]):
             return
         initial, routed = prefixes[seed]
         if initial["status"] != "ok" or routed["status"] != "ok":
@@ -733,9 +727,11 @@ class Comparison:
         )
 
     def finish(self):
-        from qtb.coordinator.costs import replay_costs
+        from qtb.coordinator.costs import replay_costs, required_cost_panels
 
-        self.records = replay_costs(self.directory, self.run, self.manifest, self.records)
+        self.records = replay_costs(
+            self.directory, self.run, self.manifest, self.policy, self.records
+        )
         rows = read_records(self.directory / "observations.jsonl")
         self.run["decisions_before"] = register_decision(
             self.root, self.run["hashes"]["manifest"], self.run["run_id"]
@@ -743,13 +739,13 @@ class Comparison:
         records, required, summaries = evaluate_quality(
             self.manifest, self.policy, rows, self.records
         )
-        from qtb.coordinator.calibration import required_cost_panels
-
         if "scope" in self.run:
             required = sorted(
                 set(required) | {f"{self.prefix}5/{name}" for name in required_cost_panels(self)}
             )
-        decision = make_decision(self.run, records, required, summaries, rows, self.manifest)
+        decision = make_decision(
+            self.run, records, required, summaries, rows, self.manifest, self.policy
+        )
         self.run["status"] = "complete"
         self.save()
         write_json(self.directory / "evidence.json", self.records)
@@ -770,7 +766,6 @@ class Comparison:
             self.build()
             self.roundtrip(cases if smoke else self.roundtrip_cases())
             if not smoke:
-                from qtb.coordinator.calibration import CalibrationIncomplete, preflight
                 from qtb.coordinator.checks import behavior_checks, clifford_checks
                 from qtb.coordinator.upstream import upstream_checks
 
@@ -788,27 +783,6 @@ class Comparison:
                 )
                 if baseline_bad:
                     return self.finish()
-                try:
-                    preflight(self, cases)
-                except CalibrationIncomplete as exc:
-                    self.evidence(
-                        record(
-                            f"calibration/{exc.phase}",
-                            "completeness",
-                            "unresolved",
-                            detail=str(exc),
-                        )
-                    )
-                except Incomplete as exc:
-                    for phase in ("quality", "cost"):
-                        self.evidence(
-                            record(
-                                f"calibration/{phase}",
-                                "completeness",
-                                "unresolved",
-                                detail=str(exc),
-                            )
-                        )
                 behavior_checks(self, revisions=("evolved",))
                 clifford_checks(self, cases)
                 upstream_checks(self)
@@ -834,7 +808,7 @@ class Comparison:
             if any(
                 r["kind"] == "improvement" and r["result"] == "passed" for r in records
             ) and not any(r["result"] == "failed" for r in records):
-                from qtb.coordinator.calibration import measure_costs
+                from qtb.coordinator.costs import measure_costs
 
                 try:
                     measure_costs(self)

@@ -120,16 +120,18 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
-| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel log time ratio within calibrated A/A noise, and no per-case breach (> 10% and above the noise floor) |
+| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel time ratio at most 1.03, and no per-case breach (> 10% slower and by more than 25 ms) |
 | IA6 completeness | `IA6/completeness` | All 2 × (9 × 100 + 3 × 10) observations are present. Determinism audit passed |
 
 Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight`,
-`audit/determinism`, `calibration/quality`, `calibration/cost`.
+`audit/determinism`.
 
 Policy values (`policy.json`): improvement multiplier 2.0, guard multiplier 3.0, practical
 ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924,
 upstream test budgets of 4 h (Python) and 3 h (Rust). Timing: 4 screen rounds, 6 full rounds,
-rerun multiplier 2, 30 calibration rounds, 1 warm-up, at least 2 timed calls and 1 s per round.
+rerun multiplier 2, 1 warm-up, at least 2 timed calls and 1 s per round. Cost thresholds
+(fixed, never calibrated): panel ratio 1.03, case ratio 1.10 above a 25 ms (32 MiB) floor,
+screen fraction 0.5.
 
 ## Statistical power
 
@@ -151,10 +153,9 @@ per revision, roughly doubled by routing replay. A cost round (16 cases in one p
 arm, 2 arms) takes about 1.5 minutes on an exclusive machine, so a clear 4-round screen is
 about 6–7 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about
 35 minutes, plus about 10–20 minutes for the companion when required. These are design
-estimates, not measured runs. The first run against
-a baseline also pays for calibration (three seed blocks of baseline quality, a 300-seed role
-audit, and 30 A/A rounds of every cost panel timing the baseline against itself, about an hour). Later
-runs reuse it for 30 days. Building the Qiskit environments dominates the first run; see
+estimates, not measured runs. There is no calibration step: the cost thresholds are fixed in
+the policy, and the baseline's quality compiles are cached for later runs. Building the
+Qiskit environments dominates the first run; see
 [environments.md](environments.md#how-long-it-takes).
 
 ## Declared coverage gaps

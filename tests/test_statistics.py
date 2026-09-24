@@ -4,12 +4,7 @@ import pytest
 
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator import record, verdict
-from qtb.evaluator.statistics import (
-    estimate,
-    hierarchical_weights,
-    paired_panel,
-    sign_flip_calibration,
-)
+from qtb.evaluator.statistics import estimate, hierarchical_weights, paired_panel
 
 
 def test_worked_example():
@@ -121,13 +116,3 @@ def test_weights_are_hierarchical():
     weights = hierarchical_weights(cases)
     assert sum(weights[str(i)] for i in range(4)) == 0.5
     assert sum(weights.values()) == 1
-
-
-def test_sign_flip_reproducible_and_shared_rows():
-    guards = [{"deltas": [0.1, -0.1, 0.08, -0.08] * 5}] * 2
-    a = sign_flip_calibration(guards, replicates=200)
-    assert a == sign_flip_calibration(guards, replicates=200)
-    assert (
-        a["false_rejection_rate"]
-        == sign_flip_calibration(guards[:1], replicates=200)["false_rejection_rate"]
-    )

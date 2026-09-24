@@ -28,18 +28,18 @@ def evaluate_run(directory):
 
     evidence_file = directory / "evidence.json"
     evidence = read_json(evidence_file) if evidence_file.exists() else []
-    evidence = replay_costs(directory, run, manifest, evidence)
+    evidence = replay_costs(directory, run, manifest, policy, evidence)
     rows = read_records(directory / "observations.jsonl")
     records, required, summaries = evaluate_quality(manifest, policy, rows, evidence)
     if "scope" in run:
         from types import SimpleNamespace
 
-        from qtb.coordinator.calibration import required_cost_panels
+        from qtb.coordinator.costs import required_cost_panels
 
         prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
         panels = required_cost_panels(SimpleNamespace(run=run, manifest=manifest))
         required = sorted(set(required) | {f"{prefix}5/{name}" for name in panels})
-    decision = make_decision(run, records, required, summaries, rows, manifest)
+    decision = make_decision(run, records, required, summaries, rows, manifest, policy)
     original = directory / "decision.json"
     decision["reevaluation"] = {
         "evaluator_identity": coordinator_identity(),

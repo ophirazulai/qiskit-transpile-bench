@@ -551,7 +551,7 @@ def test_batched_routing_prefixes_preserve_per_seed_checks(tmp_path):
         assert observation["checks"][0]["status"] == "verified", observation
 
 
-def test_routing_replay_scope_skips_calibration_and_limits_case_guards():
+def test_routing_replay_scope_limits_case_guards():
     from qtb.coordinator import Comparison, routing_replay_seeds
 
     seeds = list(range(25))
@@ -563,14 +563,12 @@ def test_routing_replay_scope_skips_calibration_and_limits_case_guards():
     assert routing_replay_seeds(basis_guard, seeds) == seeds
     assert routing_replay_seeds(case_guard, seeds) == list(range(10))
     assert routing_replay_seeds(canary, seeds) == []
-    assert routing_replay_seeds(scored, range(100, 125), "KB1") == []
-    assert routing_replay_seeds(basis_guard, range(200, 225), "KB2") == []
 
     comparison = Comparison.__new__(Comparison)
-    comparison.job = lambda *_: pytest.fail("Calibration must not launch C6 prefix jobs")
-    assert comparison.routing_batch("baseline", scored, [100, 101], "KB1") == {}
-    observation = {"seed": 100, "seed_block": "KB1", "checks": []}
-    comparison.check_routing("baseline", scored, observation, {})
+    comparison.job = lambda *_: pytest.fail("Canaries must not launch C6 prefix jobs")
+    assert comparison.routing_batch("baseline", canary, [0, 1]) == {}
+    observation = {"seed": 0, "seed_block": "B0", "checks": []}
+    comparison.check_routing("baseline", canary, observation, {})
     assert observation["checks"] == []
 
 

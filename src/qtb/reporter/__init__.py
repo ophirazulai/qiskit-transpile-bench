@@ -49,7 +49,9 @@ def _zero_baseline_deltas(manifest, observations):
     return {"status": "reported", "cases": results}
 
 
-def make_decision(run, records, required_ids, summaries, observations=(), manifest=None):
+def make_decision(
+    run, records, required_ids, summaries, observations=(), manifest=None, policy=None
+):
     observations = list(observations)
     status = verdict(records, required_ids)
     prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
@@ -72,7 +74,6 @@ def make_decision(run, records, required_ids, summaries, observations=(), manife
     for row in observations:
         if row.get("seed_block") == "B0" and row.get("seed") == 0 and row.get("fingerprint"):
             fingerprints.setdefault(row["case_id"], {})[row["revision"]] = row["fingerprint"]
-    calibration = run.get("calibrations", {}).get("false_rejection") or {}
     decision = {
         "format": "qtb-decision/1",
         "status": status,
@@ -95,9 +96,7 @@ def make_decision(run, records, required_ids, summaries, observations=(), manife
         "summaries": summaries,
         "scope": run.get("scope", {}),
         "measurement_timestamp": run.get("created_at"),
-        "calibration": calibration or None,
-        "noisy_guard_count": calibration.get("noisy_guard_count"),
-        "calibrated_false_rejection_rate": calibration.get("combined"),
+        "cost_thresholds": (policy or {}).get("cost_thresholds"),
         "fingerprint_changes": {
             case: pair
             for case, pair in sorted(fingerprints.items())
@@ -130,12 +129,14 @@ def render_report(decision):
         "This verdict concerns the fixed workload and its declared semantic contracts.",
         "",
     ]
-    calibration = decision.get("calibration")
-    if calibration:
+    fixed = decision.get("cost_thresholds")
+    if fixed:
         lines += [
-            f"Noisy guards: {calibration['noisy_guard_count']}. Calibrated family-wise "
-            f"false-rejection estimate: {calibration['combined']:.2%} "
-            f"(quality {calibration['quality']:.2%}; cost {calibration['cost']:.2%}).",
+            "Cost thresholds are fixed by policy, not calibrated on this machine: "
+            f"panel ≤ {fixed['panel_ratio']:.2f}×, a case counts only above "
+            f"{fixed['case_ratio']:.2f}× and {fixed['case_floor_ns'] / 1e6:.0f} ms "
+            f"({fixed['case_floor_bytes'] / 2**20:.0f} MiB for memory); the screen must "
+            f"clear {fixed['screen_fraction']:.0%} of the panel band.",
             "",
         ]
     if decision["reasons"] or decision["missing_records"]:
