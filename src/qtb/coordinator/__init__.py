@@ -5,6 +5,7 @@ import random
 import subprocess
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -206,6 +207,7 @@ class Comparison:
         self.run["hashes"]["implementation"] = implementation_identity()
         toolchain = baseline_toolchain(snapshots["baseline"])
         revisions = ["baseline"] + (["evolved"] if need_evolved else [])
+        pending = []
         for revision in revisions:
             directory = build_root / f"{revision}-build"
             if (directory / "build.json").exists():
@@ -213,26 +215,42 @@ class Comparison:
                 verify_build(build)
                 if build["snapshot"]["tree_hash"] != snapshots[revision]["tree_hash"]:
                     raise HarnessError("Saved build does not match the source snapshot")
-            else:
-                if directory.exists():
-                    directory.rename(
-                        directory.with_name(directory.name + ".failed-" + uuid.uuid4().hex[:8])
-                    )
-                self.progress(
-                    f"Preparing {revision} environment with baseline Rust toolchain {toolchain}."
+                self.run["builds"][revision] = build
+                self.save()
+                continue
+            if directory.exists():
+                directory.rename(
+                    directory.with_name(directory.name + ".failed-" + uuid.uuid4().hex[:8])
                 )
-                build = build_revision(
-                    snapshots[revision],
-                    directory,
-                    self.data / "envs",
-                    found[0],
-                    toolchain,
-                    cache_root=self.root / "build-cache",
-                    cache_slot=revision,
-                    progress=self.progress,
-                )
-            self.run["builds"][revision] = build
-            self.save()
+            pending.append(revision)
+
+        def compile_revision(revision):
+            self.progress(
+                f"Preparing {revision} environment with baseline Rust toolchain {toolchain}."
+            )
+            return build_revision(
+                snapshots[revision],
+                build_root / f"{revision}-build",
+                self.data / "envs",
+                found[0],
+                toolchain,
+                cache_root=self.root / "build-cache",
+                cache_slot=revision,
+                progress=self.progress,
+            )
+
+        # Revisions compile concurrently: the final LTO step of one build leaves
+        # most cores idle. Each has its own directory, CARGO_HOME and target/.
+        # A build that finished is recorded even if the other one fails.
+        with ThreadPoolExecutor(max_workers=max(1, len(pending))) as pool:
+            futures = {revision: pool.submit(compile_revision, revision) for revision in pending}
+        errors = [futures[r].exception() for r in pending if futures[r].exception()]
+        for revision in pending:
+            if futures[revision].exception() is None:
+                self.run["builds"][revision] = futures[revision].result()
+        self.save()
+        if errors:
+            raise errors[0]
         self.build_verifier(found[0])
         self.run["status"] = "built"
         self.save()

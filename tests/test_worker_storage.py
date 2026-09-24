@@ -275,6 +275,7 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
     wheel_budgets = []
     cargo_homes = []
     build_flags = []
+    fetches = []
 
     def command(args, cwd, env, log, timeout=3600):
         args = list(map(str, args))
@@ -284,13 +285,23 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
             (root / "bin/python").write_text("python")
             (root / "qiskit.py").write_text("package")
             (root / "native.so").write_bytes(b"native")
+        elif args[:2] == ["cargo", "fetch"]:
+            fetches.append(Path(env["CARGO_HOME"]))
         elif "wheel" in args:
             output = Path(args[args.index("-w") + 1])
             (output / "qiskit-test.whl").write_bytes(b"wheel")
             compiles.append(str(cwd))
             wheel_budgets.append(timeout)
             cargo_homes.append(Path(env["CARGO_HOME"]))
-            build_flags.append((env["QISKIT_BUILD_PROFILE"], env["QISKIT_BUILD_WITH_MIMALLOC"]))
+            build_flags.append(
+                (
+                    env["QISKIT_BUILD_PROFILE"],
+                    env["QISKIT_BUILD_WITH_MIMALLOC"],
+                    env["CARGO_PROFILE_RELEASE_LTO"],
+                    env["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"],
+                    env["CARGO_NET_OFFLINE"],
+                )
+            )
 
     def subprocess_run(args, **kwargs):
         args = list(map(str, args))
@@ -326,7 +337,9 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
     assert changed["id"] != first["id"]
     assert len({b["environment"] for b in (first, second, evolved, changed)}) == 4
     assert wheel_budgets == [envbuild.RUST_WHEEL_TIMEOUT_S] * 3
-    assert build_flags == [("release", "1")] * 3
+    assert build_flags == [("release", "1", "thin", "16", "true")] * 3
+    assert first["identity"]["flags"]["CARGO_PROFILE_RELEASE_LTO"] == "thin"
+    assert fetches == cargo_homes  # crates are fetched under the registry lock first
     assert len(set(cargo_homes)) == 3
     assert all((path / "config.toml").exists() for path in cargo_homes)
     assert {str((path / "registry").resolve()) for path in cargo_homes} == {

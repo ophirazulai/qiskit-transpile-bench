@@ -148,9 +148,9 @@ this loop never sees.
 
 On the development machine (serial, Apple M1 Max): about 10 CPU-minutes of quality compiles
 per revision, roughly doubled by routing replay. A cost round (16 cases in one process per
-arm, 3 arms) takes about 2–2.5 minutes on an exclusive machine, so a clear 4-round screen is
-about 10 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about
-50 minutes, plus about 10–20 minutes for the companion when required. These are design
+arm, 2 arms) takes about 1.5 minutes on an exclusive machine, so a clear 4-round screen is
+about 6–7 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about
+35 minutes, plus about 10–20 minutes for the companion when required. These are design
 estimates, not measured runs. The first run against
 a baseline also pays for calibration (three seed blocks of baseline quality, a 300-seed role
 audit, and 30 A/A rounds of every cost panel timing the baseline against itself, about an hour). Later

@@ -40,6 +40,15 @@ SERIAL = {
     "PYTHONSAFEPATH": "1",
 }
 RUST_WHEEL_TIMEOUT_S = 4 * 3600
+# Qiskit's release profile uses fat LTO with one codegen unit, which serializes
+# the final compile and link on one core. Both revisions get the same faster
+# profile, so the A/B comparison stays fair, but absolute Rust timings are not
+# those of a released Qiskit wheel. These flags enter the wheel identity.
+RUST_PROFILE = {
+    "CARGO_PROFILE_RELEASE_LTO": "thin",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+}
+BUILD_FLAGS = ("QISKIT_BUILD_PROFILE", "QISKIT_BUILD_WITH_MIMALLOC", *RUST_PROFILE)
 
 
 def sanitized_environment(extra=None):
@@ -249,6 +258,7 @@ def build_revision(
         {
             "QISKIT_BUILD_PROFILE": "release",
             "QISKIT_BUILD_WITH_MIMALLOC": "1",
+            **RUST_PROFILE,
             "RUSTUP_TOOLCHAIN": toolchain,
             "CARGO_HOME": str(cargo),
             "PIP_CONFIG_FILE": os.devnull,
@@ -272,7 +282,7 @@ def build_revision(
         "locks": {p.name: file_hash(p) for p in locks.iterdir() if p.is_file()},
         "toolchain": tool.stdout,
         "native_compilers": compilers,
-        "flags": {k: env[k] for k in ("QISKIT_BUILD_PROFILE", "QISKIT_BUILD_WITH_MIMALLOC")},
+        "flags": {k: env[k] for k in BUILD_FLAGS},
         "os": platform.system(),
         "architecture": platform.machine(),
     }
@@ -313,6 +323,16 @@ def build_revision(
         else:
             progress(f"No cached {cache_slot} Qiskit wheel; compiling Qiskit from source.")
     if not cache_hit:
+        compile_env = env
+        if cache_root is not None:
+            from qtb.coordinator.storage import locked
+
+            # Concurrent builds share the registry, but cargo's package lock lives
+            # in each build's own CARGO_HOME. Download and unpack every crate under
+            # one registry-wide lock, then compile without touching the registry.
+            with locked(Path(cache_root) / "cargo-registry.lock"):
+                run_logged(["cargo", "fetch", "--locked"], source, env, log)
+            compile_env = dict(env, CARGO_NET_OFFLINE="true")
         run_logged(
             [
                 python,
@@ -326,7 +346,7 @@ def build_revision(
                 source,
             ],
             destination,
-            env,
+            compile_env,
             log,
             timeout=RUST_WHEEL_TIMEOUT_S,
         )

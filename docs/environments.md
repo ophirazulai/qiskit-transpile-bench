@@ -35,7 +35,8 @@ every build's identity.
 
 ## How a revision is built
 
-For each revision (baseline and evolved):
+For each revision (baseline and evolved). Steps 1–4 run once; the two revisions then build
+concurrently, each in its own directory:
 
 1. **Snapshot.** If the folder is a Git repository root, the file list is
    `git ls-files -co --exclude-standard` (tracked plus untracked, non-ignored files).
@@ -55,8 +56,10 @@ For each revision (baseline and evolved):
    - copy the snapshot to `source/`
    - `python -m venv env` (same Python as the coordinator)
    - `pip install -r common.lock -r build-constraints.txt -r dev-tests.lock`
+   - `cargo fetch --locked` under a lock on the shared crate registry, so concurrent builds
+     never unpack the same crate at once
    - `pip wheel --no-deps --no-build-isolation source/` → `wheels/qiskit-*.whl`
-     (a **release** build of the Rust extension)
+     (a **release** build of the Rust extension, with `CARGO_NET_OFFLINE=true`)
    - `pip install --no-deps <qiskit wheel> <harness wheel>`, then `pip check`
 6. **Verify provenance.** `Cargo.lock` must be unchanged by the build and exactly one wheel
    must be produced. A test import must load `qiskit` and `qiskit._accelerate` from inside
@@ -68,8 +71,16 @@ For each revision (baseline and evolved):
 The build environment is sanitized. Only `PATH`, `HOME`, temp-directory, TLS-certificate and
 locale variables are inherited, so `RUSTFLAGS`, `CARGO_*`, `PYTHONPATH` and user pip config are
 dropped. On top of that the harness sets `QISKIT_BUILD_PROFILE=release`,
-`QISKIT_BUILD_WITH_MIMALLOC=1`, a private `CARGO_HOME` per build, and
-`PIP_CONFIG_FILE=/dev/null`. Cargo registry downloads are shared under
+`QISKIT_BUILD_WITH_MIMALLOC=1`, `CARGO_PROFILE_RELEASE_LTO=thin`,
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`, a private `CARGO_HOME` per build, and
+`PIP_CONFIG_FILE=/dev/null`.
+
+The two `CARGO_PROFILE_RELEASE_*` variables override Qiskit's own release profile (fat LTO, one
+codegen unit), whose final compile and link runs on a single core. Thin LTO with 16 codegen
+units compiles several times faster. Both revisions get the same profile, so the comparison
+stays fair, but the Rust code is somewhat slower than in a released Qiskit wheel, and absolute
+timings should not be compared with one. The variables are part of the build identity, so
+wheels cached under the old profile are not reused. Cargo registry downloads are shared under
 `results/build-cache/cargo-registry/`; build configuration and compiled targets remain private.
 The Rust wheel command has a four-hour timeout; the other build commands retain one hour.
 
@@ -91,7 +102,9 @@ the evolved build is still compiled independently and never reuses the baseline'
 ## How long it takes
 
 Measured on the recorded smoke run (`results/smoke-validation/runs/20260924T135815-5702c324`,
-Apple M1 Max, 10 cores, macOS, Rust 1.89, Qiskit 2.6.0.dev0 source):
+Apple M1 Max, 10 cores, macOS, Rust 1.89, Qiskit 2.6.0.dev0 source). That run used Qiskit's
+fat-LTO profile and built the revisions one after another; neither applies any more, and the
+thin-LTO concurrent build has not been timed yet, so expect considerably less than this:
 
 | Step | Time | Disk |
 | --- | --- | --- |
