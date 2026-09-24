@@ -101,13 +101,13 @@ therefore timed on the `cz` cases and, through the **multi-seed companion panel*
 `cz` cases over seeds 0–19 (three rounds per seed). The companion exists because one fixed seed
 times only one search path.
 
-**How a panel is measured.** Every round is one fresh process per arm (baseline, control,
+**How a panel is measured.** Every round is one fresh process per arm (baseline,
 evolved) that loads, warms up and times each case of the panel in manifest order, with the
 arms in random order. A case's time in a round is the median of its timed calls (at least 2
 calls and 1 s); the case time is the median over rounds. The panel starts with a 4-round
-**screen**: if the control arm is clean and the candidate already sits inside the noise band
+**screen**: if the candidate already sits inside the noise band
 of the full 6-round measurement with no per-case breach, the panel stops. Otherwise it is
-measured in full in a fresh session, and a candidate-only breach triggers one fresh 12-round
+measured in full in a fresh session, and a breach triggers one fresh 12-round
 rerun that decides. The report names the regime each panel ended in.
 
 ## Acceptance rules (IA1–IA6)
@@ -120,7 +120,7 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
-| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel log time ratio within calibrated A/A noise, no per-case breach (> 10% and above the noise floor), and the control arm is clean |
+| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel log time ratio within calibrated A/A noise, and no per-case breach (> 10% and above the noise floor) |
 | IA6 completeness | `IA6/completeness` | All 2 × (9 × 100 + 3 × 10) observations are present. Determinism audit passed |
 
 Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight`,
@@ -153,7 +153,7 @@ about 10 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 roun
 50 minutes, plus about 10–20 minutes for the companion when required. These are design
 estimates, not measured runs. The first run against
 a baseline also pays for calibration (three seed blocks of baseline quality, a 300-seed role
-audit, and 30 A/A rounds of every cost panel from two baseline builds, about an hour). Later
+audit, and 30 A/A rounds of every cost panel timing the baseline against itself, about an hour). Later
 runs reuse it for 30 days. Building the Qiskit environments dominates the first run; see
 [environments.md](environments.md#how-long-it-takes).
 

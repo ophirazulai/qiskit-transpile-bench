@@ -34,20 +34,20 @@ Three rules shape the whole design:
 ```text
   baseline folder ─┐                               ┌─ profile: manifest.json, policy.json
   evolved folder  ─┼─► snapshot ─► build wheels ───┤     fixtures (circuits, targets)
-                   │   (envbuild)  (3 venvs)       │
+                   │   (envbuild)  (2 venvs)       │
                    │                               ▼
                    │                         ┌────────────┐
                    │        job.json ───────►│ coordinator│◄──── never imports Qiskit
                    │                         └─────┬──────┘
-                   │             ┌─────────────────┼─────────────────┐
-                   ▼             ▼                 ▼                 ▼
-          worker (baseline venv)  worker (evolved venv)  worker (control venv)   verifier venv
-          imports that revision   imports that revision  second baseline build   Qiskit 2.5.2
-                   │                    │                        │                   │
-                   └── canonical outputs, layouts, timings ──────┘    oracle results │
-                                        │                                            │
-                                        ▼                                            │
-                         observations.jsonl, evidence.json  ◄─────────────────────────┘
+                   │             ┌─────────────────┴─────────────────┐
+                   ▼             ▼                                   ▼
+          worker (baseline venv)  worker (evolved venv)         verifier venv
+          imports that revision   imports that revision         Qiskit 2.5.2
+                   │                    │                            │
+                   └─ outputs, layouts, timings                      oracle results
+                                        │                            │
+                                        ▼                            │
+                         observations.jsonl, evidence.json  ◄────────┘
                                         │
                                         ▼
                          evaluator ─► reporter ─► decision.json + report.md
@@ -118,8 +118,7 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
    policy are archived there with their hashes.
 2. **Build.** Snapshot both source folders, compute the changed files and the
    [change scope](metrics.md#7-change-scope-and-stage-coverage), build the harness wheel, then
-   build three Qiskit environments (baseline, evolved, and a second independent baseline
-   build called `control`) plus the verifier environment.
+   build two Qiskit environments (baseline and evolved) plus the verifier environment.
 3. **Round-trip.** Every revision rebuilds every input circuit and target and must reproduce
    the frozen hashes. This proves that both revisions compile identical inputs.
 4. **Baseline preflight.** The baseline runs the frozen C1–C5 correctness suite. If the
@@ -136,7 +135,7 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
 8. **Determinism audit.** At least 5% (minimum 10) of observations are recompiled, half of
    them with a different `PYTHONHASHSEED`, and must reproduce identical outputs.
 9. **Cost:** timing and memory panels, measured only if the improvement test passed and
-   nothing has failed. The three arms (baseline, control, evolved) are interleaved in random
+   nothing has failed. The two arms (baseline, evolved) are interleaved in random
    order, each round in a fresh process per arm. A short screen ends a clearly clean panel
    early; otherwise the panel is measured in full and, on a candidate-only breach, rerun once.
 10. **Decision.** The evaluator combines all records into a verdict. The reporter writes
@@ -149,13 +148,13 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
 
 | Path | What | Reused when |
 | --- | --- | --- |
-| `results/build-cache/<slot>/<identity>/` | Built Qiskit wheels, one slot each for baseline, evolved and control | Same source tree hash, Python, locks, Rust toolchain, C compilers, build flags, OS and architecture |
+| `results/build-cache/<slot>/<identity>/` | Built Qiskit wheels, one slot each for baseline and evolved | Same source tree hash, Python, locks, Rust toolchain, C compilers, build flags, OS and architecture |
 | `results/quality-cache/<key>/` | Per-seed quality observations and their output files | Same build, case definition, CPU model, worker protocol, harness implementation, measurement protocol, seed block |
 | `results/calibrations/<key>/` | Quality false-rejection and cost A/A calibrations | Same baseline build, manifest, policy, machine and calibration code; expires after 30 days |
 | `results/decision-counts.json` | Every decision per manifest hash | Always appended; shows how often a profile has been used |
 | `results/qualifications/<hash>.json` | Maintainer attestation that a run's configuration is qualified | Written by hand; see [implementation-status.md](implementation-status.md) |
 
-Cost samples are never cached. Every comparison measures all three arms again.
+Cost samples are never cached. Every comparison measures both arms again.
 
 A machine-wide lock (`$TMPDIR/qtb-runner-<uid>.lock`) is held shared by quality jobs and
 exclusively by cost sessions, so timing is never measured while compiles run.
@@ -173,7 +172,7 @@ src/qtb/
     __init__.py       Comparison: lifecycle, quality, audit, routing replay, aggregation
     calibration.py    preflight, quality/cost calibration, role freeze
     checks.py         C1–C5 behavior suite, API checks, C7 Clifford checks
-    costs.py          interleaved three-arm cost sessions
+    costs.py          interleaved two-arm cost sessions
     upstream.py       baseline-owned Python tests and Rust tests
     process.py        worker subprocess with heartbeats and timeouts
     storage.py        locks, JSONL records, caches, output pruning

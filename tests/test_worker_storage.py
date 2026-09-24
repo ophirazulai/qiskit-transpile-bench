@@ -316,15 +316,15 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
     cache = tmp_path / "cache"
     first = envbuild.build_revision(info, tmp_path / "a", locks, wheel, "1.89", cache, "baseline")
     second = envbuild.build_revision(info, tmp_path / "b", locks, wheel, "1.89", cache, "baseline")
-    control = envbuild.build_revision(info, tmp_path / "c", locks, wheel, "1.89", cache, "control")
+    evolved = envbuild.build_revision(info, tmp_path / "c", locks, wheel, "1.89", cache, "evolved")
     changed = envbuild.build_revision(
         dict(info, tree_hash="source2"), tmp_path / "d", locks, wheel, "1.89", cache, "baseline"
     )
     assert len(compiles) == 3
-    assert first["id"] == second["id"] == control["id"]
-    assert second["wheel_cache_hit"] and not control["wheel_cache_hit"]
+    assert first["id"] == second["id"] == evolved["id"]
+    assert second["wheel_cache_hit"] and not evolved["wheel_cache_hit"]
     assert changed["id"] != first["id"]
-    assert len({b["environment"] for b in (first, second, control, changed)}) == 4
+    assert len({b["environment"] for b in (first, second, evolved, changed)}) == 4
     assert wheel_budgets == [envbuild.RUST_WHEEL_TIMEOUT_S] * 3
     assert build_flags == [("release", "1")] * 3
     assert len(set(cargo_homes)) == 3

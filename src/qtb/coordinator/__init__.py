@@ -161,11 +161,11 @@ class Comparison:
         self.records = [r for r in self.records if r["id"] != row["id"]] + [row]
         write_json(self.directory / "evidence.json", self.records)
 
-    def build(self, need_control=True, need_evolved=True):
+    def build(self, need_evolved=True):
         with locked(runner_lock(), shared=True):
-            return self._build(need_control, need_evolved)
+            return self._build(need_evolved)
 
-    def _build(self, need_control=True, need_evolved=True):
+    def _build(self, need_evolved=True):
         load_profile(self.run["profile"], self.data, verify=True)
         build_root = self.directory / "builds"
         build_root.mkdir(exist_ok=True)
@@ -205,20 +205,13 @@ class Comparison:
         self.run["hashes"]["harness"] = file_hash(found[0])
         self.run["hashes"]["implementation"] = implementation_identity()
         toolchain = baseline_toolchain(snapshots["baseline"])
-        revisions = (
-            ["baseline"]
-            + (["evolved"] if need_evolved else [])
-            + (["control"] if need_control else [])
-        )
+        revisions = ["baseline"] + (["evolved"] if need_evolved else [])
         for revision in revisions:
             directory = build_root / f"{revision}-build"
             if (directory / "build.json").exists():
                 build = read_json(directory / "build.json")
                 verify_build(build)
-                if (
-                    build["snapshot"]["tree_hash"]
-                    != snapshots["baseline" if revision == "control" else revision]["tree_hash"]
-                ):
+                if build["snapshot"]["tree_hash"] != snapshots[revision]["tree_hash"]:
                     raise HarnessError("Saved build does not match the source snapshot")
             else:
                 if directory.exists():
@@ -229,7 +222,7 @@ class Comparison:
                     f"Preparing {revision} environment with baseline Rust toolchain {toolchain}."
                 )
                 build = build_revision(
-                    snapshots["baseline" if revision == "control" else revision],
+                    snapshots[revision],
                     directory,
                     self.data / "envs",
                     found[0],
@@ -756,7 +749,7 @@ class Comparison:
             f"{sum(c['seeds_per_block'] for c in cases)} compiles per revision before checks."
         )
         try:
-            self.build(need_control=not smoke)
+            self.build()
             self.roundtrip(cases if smoke else self.roundtrip_cases())
             if not smoke:
                 from qtb.coordinator.calibration import CalibrationIncomplete, preflight

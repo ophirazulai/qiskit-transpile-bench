@@ -15,7 +15,7 @@ The original RevLib/HWB claims do not transfer to their declared generated repla
 Adding or reweighting cases invalidates aggregate decisions while preserving compilation
 cache entries for unchanged case definitions. Input/reference/target/options changes
 invalidate the affected case. Source content, Python, dependencies, Rust toolchain and
-build flags enter wheel identity; baseline/control/evolved wheel cache slots are separate.
+build flags enter wheel identity; baseline/evolved wheel cache slots are separate.
 Worker protocol, coordinator/harness code, serial environment, machine, and measurement
 policy scope quality evidence. Fresh cost sessions always collect independent arms;
 only complete bundles from the same comparison can be resumed.

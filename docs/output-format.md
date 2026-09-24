@@ -49,7 +49,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `changed-tests.json` | `compare` | Test files and Rust sources that the evolved tree changed |
 | `upstream-baseline/`, `upstream-evolved/` | `compare` | Upstream pytest records (`tests.jsonl`), logs and `rust.log` |
 | `upstream-evolved-own.json` | `compare` | Report-only run of the candidate's own Python tests |
-| `cost/<panel>/screen.json`, `normal.json`, `rerun.json` | `compare` | Raw three-arm timing or memory bundles, one per regime reached; sessions in subdirectories. A timing session holds one `timing_batch` job per round and arm |
+| `cost/<panel>/screen.json`, `normal.json`, `rerun.json` | `compare` | Raw two-arm timing or memory bundles, one per regime reached; sessions in subdirectories. A timing session holds one `timing_batch` job per round and arm |
 | `builds/` | Coordinator | Snapshots, build directories, `build.json`, `build.log` ([environments.md](environments.md)) |
 | `verifier/` | Coordinator | Verifier environment |
 | `harness-wheel/`, `harness-build.log` | Coordinator | The harness wheel installed everywhere |
@@ -84,7 +84,7 @@ Schema: `src/qtb/config/schemas/decision.json` (format `qtb-decision/1`).
 | `improved_under_constraints` | `true` for `PASS`, `false` for `NO_IMPROVEMENT` and `CONSTRAINT_VIOLATION`, `null` otherwise |
 | `profile`, `run_id`, `seed_block` | Which profile, which run; always block `B0` |
 | `hashes` | Manifest, policy, coordinator, harness wheel and implementation hashes |
-| `identities` | Build ID of each revision (`baseline`, `evolved`, `control`) |
+| `identities` | Build ID of each revision (`baseline`, `evolved`) |
 | `decisions_before` | How many earlier decisions the results root holds for this manifest |
 | `constraints` | Every constraint record: `id`, `kind`, `subject`, `result`, plus details such as `value`, `SE`, `threshold` and `detail` |
 | `required_ids` | The record IDs that must all pass for `PASS` |
@@ -123,8 +123,8 @@ The same information as `decision.json`, written for people. Sections, in order:
    log units, and the upper bound `ln(score) + 2·SE`. The confirm profile adds the report-only
    instance bootstrap.
 5. **Per-case changes:** each case and metric with its seed-aggregated ratio and worst seed.
-6. **Compilation cost:** each cost panel's result and the candidate's and control arm's
-   log time ratios against the baseline.
+6. **Compilation cost:** each cost panel's result and the candidate's log time ratio
+   against the baseline.
 7. **Coverage and provenance:** the stage-coverage rule, the change scope as JSON, declared
    workload gaps, and the cases whose pipeline fingerprints changed.
 

@@ -42,9 +42,8 @@ caches for the pinned Python and Rust dependencies. See [environments](docs/envi
 
 1. **Copy and build.** Each source folder is snapshotted and built from scratch into its own
    virtual environment as a release wheel, with the same pinned dependencies and the
-   baseline's Rust toolchain. `compare` also builds the baseline a second time as a noise
-   control. A separate environment gets an independently pinned Qiskit 2.5.2 for checking
-   results.
+   baseline's Rust toolchain. A separate environment gets an independently pinned Qiskit
+   2.5.2 for checking results.
 2. **Same inputs.** Both revisions rebuild every benchmark circuit and target from frozen data
    and must reproduce the exact hashes, which proves they compile the same thing.
 3. **Correctness first.** Both revisions run a frozen suite of 2,400 small compiles that
@@ -57,8 +56,7 @@ caches for the pinned Python and Rust dependencies. See [environments](docs/envi
    candidate never grades itself), then compares the two revisions seed by seed.
    An improvement counts only if it is larger than two standard errors of the seed noise.
 6. **Time it.** If depth improved and nothing failed, compile time (and memory, for confirm)
-   is measured on the baseline, the control build and the candidate, interleaved on a quiet
-   machine.
+   is measured on the baseline and the candidate, interleaved on a quiet machine.
 7. **Decide.** Every check becomes a record. The verdict follows fixed rules, and
    `report.md` explains it.
 
@@ -86,7 +84,7 @@ shows the score with the three iterations circuits removed.
 `smoke` is an optional quick check that both revisions build and run. It does not produce a
 verdict.
 
-It builds the baseline and evolved release wheels (no control build) and round-trips the
+It builds the baseline and evolved release wheels and round-trips the
 quality cases. It then compiles each non-timing, non-memory case with seed 0 only for both
 revisions, and runs only the structural legality and metrics check on each output. It skips
 the correctness suites, calibration, routing replay, semantic oracles, the quality cache and
@@ -157,7 +155,7 @@ for details.
 | Confirm quality compiles | About 3.5 CPU-hours for the candidate once the baseline is cached |
 | Cost panels, iterations | One round (3 arms × 16 cases) is about 2–2.5 min. Typical: the 4-round screen, about 10 min. Worst: screen + 6-round full measurement + 12-round rerun = 22 rounds, about 50 min. Add about 10–20 min for the multi-seed companion when the change touches layout or routing |
 | Cost panels, confirm | One round (3 arms × 36 cases) is about 5 min. Typical: the 4-round screen (about 20 min) plus memory (about 15 min), about 35–40 min. Worst: screen + 10-round full + 20-round rerun = 34 rounds, about 3 h, plus a memory rerun |
-| First `compare` against a new baseline | Also pays for calibration and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days. Calibration compiles the baseline on two extra seed blocks (about 25 CPU-min for iterations, about 3 CPU-h for confirm) and times baseline against control for 30 rounds on every cost panel: about 1 h for the batched timing panels, plus the multi-seed companion at 30 rounds per seed (about 2–6 h for iterations, more for confirm), which dominates |
+| First `compare` against a new baseline | Also pays for calibration and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days. Calibration compiles the baseline on two extra seed blocks (about 25 CPU-min for iterations, about 3 CPU-h for confirm) and times the baseline against itself for 30 rounds on every cost panel: about 1 h for the batched timing panels, plus the multi-seed companion at 30 rounds per seed (about 2–6 h for iterations, more for confirm), which dominates |
 
 Cost panels are estimates from the design probes, not measured runs: no full comparison with
 cost measurement has been recorded yet. They run only after the quality test has passed, on an

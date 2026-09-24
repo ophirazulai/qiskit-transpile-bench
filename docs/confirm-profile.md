@@ -116,7 +116,7 @@ three-circuit iterations score to improve.
 | CA2 improvement | `CA2/improvement` | `ln(D2 score) + 2·SE < ln(0.99)`, a practical 1% reduction beyond seed noise |
 | CA3 breadth | `CA3/breadth` | At least 4 of the 8 families individually satisfy `ln(D2) + 2·SE < 0`, **and** removing any one family still leaves the score below 1 |
 | CA4 guards | `CA3/primary/N2`, `CA3/cx/*`, `CA3/ecr/*`, `CA4/family/<G>/<metric>`, `CA4/optimization_level/<L>/<metric>`, `CA4/cap/...`, `CA4/exact/...` | Every family and level summary has `ln(score) ≤ 3·SE` for `D2` and `N2`, and so does overall `N2`. Per-case caps (1.05). Deterministic, zero-baseline and canary cases exact. Band, topology and basis summaries are reported only |
-| CA5 cost | `CA5/timing`, `CA5/timing-basis`, `CA5/confirm-timing`, `CA5/memory`, `CA5/preset`, `CA5/companion` | Each panel within calibrated A/A noise, no per-case breach, clean control arm. Timing panels screen with 4 rounds and measure 10 in full ([iterations-profile.md](iterations-profile.md#timing-panels)) |
+| CA5 cost | `CA5/timing`, `CA5/timing-basis`, `CA5/confirm-timing`, `CA5/memory`, `CA5/preset`, `CA5/companion` | Each panel within calibrated A/A noise and no per-case breach. Timing panels screen with 4 rounds and measure 10 in full ([iterations-profile.md](iterations-profile.md#timing-panels)) |
 | CA6 completeness | `CA6/completeness` | Every observation present; determinism audit passed |
 
 Report-only numbers:

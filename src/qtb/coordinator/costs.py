@@ -10,7 +10,13 @@ from qtb.canonical import digest, read_json, write_json
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.storage import locked, runner_lock
 from qtb.errors import Incomplete
-from qtb.evaluator.cost import calibrate_cost, cost_guard, regime_counts
+from qtb.evaluator.cost import (
+    CALIBRATION_ARMS,
+    MEASURED_ARMS,
+    calibrate_cost,
+    cost_guard,
+    regime_counts,
+)
 
 REGIMES = ("screen", "normal", "rerun")
 
@@ -186,12 +192,12 @@ def calibrate_panel(run, builds, cases, estimator, directory, fixture_root, meas
     _, collected = regime_counts(estimator, measurement_protocol)
     bundle = collect_panel(
         run,
-        builds,
+        {arm: builds["baseline"] for arm in CALIBRATION_ARMS},
         cases,
         estimator,
         directory,
         collected,
-        ["baseline", "control"],
+        list(CALIBRATION_ARMS),
         fixture_root,
         measurement_protocol,
     )
@@ -240,7 +246,7 @@ def measure_panel(
                 estimator,
                 Path(directory) / regime,
                 count,
-                ["baseline", "control", "evolved"],
+                list(MEASURED_ARMS),
                 fixture_root,
                 measurement_protocol,
             )
@@ -294,7 +300,7 @@ def replay_costs(directory, run, manifest, evidence):
                     raise Incomplete("Cost bundle case definitions changed")
                 if any(
                     bundle["arms"][a]["build_id"] != run["builds"][a]["id"]
-                    for a in ("baseline", "control", "evolved")
+                    for a in MEASURED_ARMS
                 ):
                     raise Incomplete("Cost bundle build identities changed")
                 return bundle, cost_guard(bundle, calibration, run["run_id"], historical=True)

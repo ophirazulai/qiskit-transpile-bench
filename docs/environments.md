@@ -13,10 +13,10 @@ Code: `src/qtb/envbuild/__init__.py` (snapshot and build) and `Comparison._build
 | --- | --- | --- | --- |
 | Your development env | `.venv/` (from `uv sync --all-extras`) | The harness, `jsonschema`, and Qiskit 2.5.2 with pytest and ruff for development | Running the CLI (coordinator) and the harness's own tests. The coordinator never imports Qiskit |
 | Revision envs | `results/runs/<run>/builds/<revision>-build/env/` | Qiskit built from that revision's snapshot, pinned runtime dependencies, the harness wheel | Workers: compiling, timing, memory, upstream tests |
-| Control env | `results/runs/<run>/builds/control-build/env/` | A second, independent build of the **baseline** | The A/A arm for cost calibration and in-run noise control. `compare` only |
 | Verifier env | `results/runs/<run>/verifier/env/` | Released Qiskit 2.5.2, pinned dependencies, the harness wheel | Semantic oracles ([verifier.md](verifier.md)) |
 
-`smoke` builds baseline, evolved and verifier. `compare` also builds the control env.
+`smoke` and `compare` both build baseline, evolved and verifier. Cost calibration times the
+baseline env as both A/A arms.
 
 ## The `envs/` directory
 
@@ -35,7 +35,7 @@ every build's identity.
 
 ## How a revision is built
 
-For each revision (baseline, evolved, and control for `compare`):
+For each revision (baseline and evolved):
 
 1. **Snapshot.** If the folder is a Git repository root, the file list is
    `git ls-files -co --exclude-standard` (tracked plus untracked, non-ignored files).
@@ -81,12 +81,12 @@ The verifier env is simpler: `python -m venv`, then
 
 A build's identity is the hash of: snapshot tree hash, Python version, lock-file hashes,
 `rustc -Vv`, C/C++ compiler versions, build flags, OS and CPU architecture. Built wheels are
-cached in `results/build-cache/<slot>/<identity>/`, where the slot is `baseline`, `evolved`
-or `control`. When a later run has the same identity in the same slot, the wheel is copied
+cached in `results/build-cache/<slot>/<identity>/`, where the slot is `baseline` or
+`evolved`. When a later run has the same identity in the same slot, the wheel is copied
 from the cache and the Rust compile is skipped. The venv and dependency install still run.
 
-The slots are separate on purpose. The control build must be an independent build of the
-baseline, and it never reuses the baseline's wheel.
+The slots are separate on purpose. When both folders hold the same source (an A/A check),
+the evolved build is still compiled independently and never reuses the baseline's wheel.
 
 ## How long it takes
 
@@ -113,8 +113,8 @@ What this means for your runs:
 | Situation | Builds compiled from scratch |
 | --- | --- |
 | First `smoke` | 2 (baseline, evolved) |
-| First `compare` | 3 (baseline, evolved, control) |
-| Re-running with unchanged baseline source | Baseline and control come from the wheel cache; only a changed evolved tree recompiles |
+| First `compare` | 2 (baseline, evolved) |
+| Re-running with unchanged baseline source | Baseline comes from the wheel cache; only a changed evolved tree recompiles |
 | `--resume` of an interrupted run | None for builds whose `build.json` already exists; a half-finished build directory is renamed `*.failed-<id>` and rebuilt |
 
 Every build command has a **1-hour timeout**. A slower machine that cannot compile Qiskit in an

@@ -48,7 +48,7 @@ def test_distinct_estimators():
 
 
 def test_memory_calibration_resamples_with_replacement():
-    arms = {a: {"case": list(range(100, 110))} for a in ("baseline", "control")}
+    arms = {a: {"case": list(range(100, 110))} for a in ("baseline", "replica")}
     result = calibrate_cost(
         arms, "memory", {"case": 1}, {"cpu": "test"}, datetime.now(UTC).isoformat(), replicates=100
     )
@@ -59,10 +59,10 @@ def test_memory_calibration_resamples_with_replacement():
     )
 
 
-def bundle_and_calibration(ratio=1.15, control=1.0, regime="normal"):
+def bundle_and_calibration(ratio=1.15, regime="normal"):
     now = datetime.now(UTC).isoformat()
     calibration = calibrate_cost(
-        {a: {"c": [[80]] * 30} for a in ("baseline", "control")},
+        {a: {"c": [[80]] * 30} for a in ("baseline", "replica")},
         "timing",
         {"c": 1},
         {"cpu": "test"},
@@ -84,7 +84,7 @@ def bundle_and_calibration(ratio=1.15, control=1.0, regime="normal"):
                 build_id="identical",
                 samples={"c": [[80 * value]] * (20 if regime == "rerun" else 10)},
             )
-            for arm, value in [("baseline", 1), ("control", control), ("evolved", ratio)]
+            for arm, value in [("baseline", 1), ("evolved", ratio)]
         },
     )
     return bundle, calibration
@@ -101,29 +101,28 @@ def test_fresh_baseline_prevents_historical_100ms_hiding_92ms_regression():
 
 
 @pytest.mark.parametrize(
-    "ratio,control,regime,expected",
+    "ratio,regime,expected",
     [
-        (1.15, 1.0, "normal", "unresolved"),
-        (1.15, 1.0, "rerun", "failed"),
-        (1.0, 1.0, "rerun", "passed_on_rerun"),
-        (1.15, 1.15, "rerun", "unresolved"),
-        (1.0, 1.0, "normal", "passed"),
+        (1.15, "normal", "unresolved"),
+        (1.15, "rerun", "failed"),
+        (1.0, "rerun", "passed_on_rerun"),
+        (1.0, "normal", "passed"),
     ],
 )
-def test_rerun_and_control(ratio, control, regime, expected):
-    bundle, calibration = bundle_and_calibration(ratio, control, regime)
+def test_rerun(ratio, regime, expected):
+    bundle, calibration = bundle_and_calibration(ratio, regime)
     assert cost_guard(bundle, calibration)["result"] == expected
 
 
 def test_identical_builds_cannot_coalesce_arms():
     bundle, calibration = bundle_and_calibration()
-    bundle["arms"]["control"]["arm_id"] = "baseline"
+    bundle["arms"]["evolved"]["arm_id"] = "baseline"
     with pytest.raises(HarnessError):
         validate_bundle(bundle, calibration)
 
 
 def test_cost_null_calibration_applies_confirmed_rerun_rule():
-    arms = {a: {"case": [[100]] * 30} for a in ("baseline", "control")}
+    arms = {a: {"case": [[100]] * 30} for a in ("baseline", "replica")}
     result = calibrate_cost(
         arms, "timing", {"case": 1}, {}, datetime.now(UTC).isoformat(), replicates=100
     )
@@ -148,13 +147,13 @@ def screened_bundle(calibration, ratio, regime, session="session"):
                 build_id="identical",
                 samples={"c": [[80 * value]] * count},
             )
-            for arm, value in [("baseline", 1), ("control", 1), ("evolved", ratio)]
+            for arm, value in [("baseline", 1), ("evolved", ratio)]
         },
     )
 
 
 def test_screen_regime_is_calibrated_and_judged_against_the_full_band():
-    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "control")}
+    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "replica")}
     calibration = calibrate_cost(
         arms, "timing", {"c": 1}, {"cpu": "test"}, datetime.now(UTC).isoformat(),
         replicates=20, protocol=SCREENED,
@@ -197,8 +196,8 @@ def measured_panel(monkeypatch, tmp_path, ratio):
     monkeypatch.setattr(costs, "run_worker", worker)
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     case = {"case_id": "c", "panel": "timing", "timeout_s": 120, "modes": ["timing_e2e"]}
-    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
-    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "control")}
+    builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
+    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "replica")}
     calibration = calibrate_cost(
         arms, "timing", {"c": 1}, {}, datetime.now(UTC).isoformat(),
         replicates=20, protocol=SCREENED,
@@ -216,7 +215,7 @@ def test_clear_screen_ends_the_panel_early(monkeypatch, tmp_path):
 
     result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.0)
     assert (result["result"], result["regime"], result["count"]) == ("passed", "screen", 2)
-    assert len(calls) == 2 * 3  # screen rounds × arms, nothing more
+    assert len(calls) == 2 * 2  # screen rounds × arms, nothing more
     assert (tmp_path / "cost/timing/screen.json").exists()
     assert not (tmp_path / "cost/timing/normal.json").exists()
     assert read_json(tmp_path / "cost/timing/screen.json")["regime"] == "screen"
@@ -227,7 +226,7 @@ def test_unclear_screen_measures_in_full_then_reruns_fresh(monkeypatch, tmp_path
 
     result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.15)
     assert (result["result"], result["regime"], result["count"]) == ("failed", "rerun", 8)
-    assert len(calls) == (2 + 4 + 8) * 3
+    assert len(calls) == (2 + 4 + 8) * 2
     regimes = ("screen", "normal", "rerun")
     bundles = {r: read_json(tmp_path / f"cost/timing/{r}.json") for r in regimes}
     assert len({b["session_id"] for b in bundles.values()}) == 3
@@ -275,13 +274,13 @@ def test_timing_panel_is_one_process_per_round_and_arm(monkeypatch, tmp_path):
         {"case_id": "T11", "timeout_s": 300, "modes": ["timing_reuse"], "timing": {"fixed_seed": 3}},  # noqa: E501
         {"case_id": "preset/cz", "timeout_s": 120, "modes": ["preset_build"]},
     ]
-    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "control", "evolved"))}
+    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "evolved"))}
     result = costs.collect_panel(
         {"run_id": "r", "machine": {}}, builds, cases, "timing", tmp_path, 3, list(builds),
         tmp_path, SCREENED,
     )
-    assert len(calls) == 3 * 3  # rounds × arms, not rounds × arms × cases
-    assert len({directory for _, _, directory in calls}) == 9
+    assert len(calls) == 3 * 2  # rounds × arms, not rounds × arms × cases
+    assert len({directory for _, _, directory in calls}) == 6
     for _, job, _ in calls:
         assert job["mode"] == "timing_batch" and "case" not in job
         assert job["seeds"] == [0, 1, 2] and job["timeout_s"] == 1500
@@ -311,7 +310,7 @@ def test_companion_batches_seeds_per_arm_round_without_changing_samples(monkeypa
     monkeypatch.setattr(costs, "run_worker", worker)
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_reuse"]}
-    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "control", "evolved"))}
+    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "evolved"))}
     result = costs.collect_panel(
         {"run_id": "r", "machine": {}},
         builds,
@@ -323,12 +322,12 @@ def test_companion_batches_seeds_per_arm_round_without_changing_samples(monkeypa
         tmp_path,
         {"warmups": 2, "minimum_calls": 4, "minimum_ns": 250},
     )
-    assert len(calls) == 6  # two rounds × three arms, rather than 120 processes
+    assert len(calls) == 4  # two rounds × two arms, rather than 120 processes
     assert all(
         mode == "timing_reuse" and seeds == tuple(range(20))
         for _, mode, seeds, _, _ in calls
     )
-    assert len({directory for _, _, _, directory, _ in calls}) == 6
+    assert len({directory for _, _, _, directory, _ in calls}) == 4
     assert all(
         (job["warmups"], job["minimum_calls"], job["minimum_ns"]) == (2, 4, 250)
         for *_, job in calls
@@ -353,7 +352,7 @@ def test_cost_interleaving_seed_is_derived_from_run_and_archived(monkeypatch, tm
     monkeypatch.setattr(costs, "run_worker", worker)
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
-    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
+    builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
     protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
 
     def collect(run_id, name):
@@ -392,7 +391,7 @@ def test_incomplete_cost_panel_restarts_all_arms(monkeypatch, tmp_path):
     monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
     monkeypatch.setattr(costs, "cost_guard", lambda *_: {"result": "passed", "needs_rerun": False})
     case = {"case_id": "c", "timeout_s": 120, "modes": ["timing_e2e"]}
-    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
+    builds = {arm: {"id": arm} for arm in ("baseline", "evolved")}
     calibration = {"id": "cal", "regimes": {"normal": {"count": 2}, "rerun": {"count": 4}}}
     protocol = {"warmups": 1, "minimum_calls": 3, "minimum_ns": 1_000_000_000}
     result = costs.measure_panel(
@@ -419,7 +418,7 @@ def test_cost_replay_ignores_claimed_pass_without_fresh_rerun(tmp_path):
         run_id="run",
         scope={},
         calibrations={"cost": {"timing": calibration}},
-        builds={a: {"id": "identical"} for a in ("baseline", "control", "evolved")},
+        builds={a: {"id": "identical"} for a in ("baseline", "evolved")},
     )
     write_json(tmp_path / "cost/timing/normal.json", normal)
     forged = [record("IA5/timing", "cost", "passed")]

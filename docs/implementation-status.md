@@ -17,7 +17,7 @@ not measurements of an evolved Qiskit revision.
 - Paired log estimators, quality caps, exact and zero-baseline guards, family/level summaries,
   confirm breadth, leave-iterations-out reporting, family cluster bootstrap, and sign-flip
   calibration. The verdict procedure preserves candidate-failure precedence.
-- Estimator-specific A/A cost calibration, fresh three-arm sessions, independent arm IDs,
+- Estimator-specific A/A cost calibration, fresh two-arm sessions, independent arm IDs,
   separately calibrated doubled-count reruns, calibration expiry, archived bundles, and
   combined quality/cost false-rejection calibration.
 - Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable run

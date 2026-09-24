@@ -73,7 +73,7 @@ def test_replayed_preset_breach_is_report_only_when_scope_is_unrelated(tmp_path,
     run = comparison_.run
     run.update(
         run_id="run",
-        builds={arm: {"id": "build"} for arm in ("baseline", "control", "evolved")},
+        builds={arm: {"id": "build"} for arm in ("baseline", "evolved")},
         calibrations={"cost": {"preset": {}}},
     )
     write_json(

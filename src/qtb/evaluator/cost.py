@@ -1,4 +1,4 @@
-"""Estimator-specific A/A calibration and three-arm cost guards."""
+"""Estimator-specific A/A calibration and two-arm cost guards."""
 
 import math
 import random
@@ -11,6 +11,10 @@ from qtb.evaluator.statistics import quantile
 
 # Fallback (screen, normal, rerun, collected) counts when a policy names none.
 COUNTS = {"timing": (0, 10, 20, 30), "companion": (0, 3, 6, 30), "memory": (0, 5, 10, 10)}
+# A/A calibration times the baseline build as two interleaved arms, each in its
+# own fresh processes. The replica series stands in for an unchanged candidate.
+CALIBRATION_ARMS = ("baseline", "replica")
+MEASURED_ARMS = ("baseline", "evolved")
 
 
 def regime_counts(estimator, protocol=None):
@@ -83,15 +87,15 @@ def calibrate_cost(
     replicates=1000,
     protocol=None,
 ):
-    """arms = {baseline/control: {case: raw rounds/processes}}.
+    """arms = {baseline/replica: {case: raw rounds/processes}}, one build timed twice.
 
     Round indices are shared across cases and companion seeds to preserve session
     blocks. Inner timed calls stay intact. All draws are with replacement. Every
     regime the protocol names (screen, normal, rerun) gets its own noise band and
     per-case floors at that regime's sample count.
     """
-    if set(arms) != {"baseline", "control"} or not weights:
-        raise HarnessError("A/A calibration needs two independent baseline arms")
+    if set(arms) != set(CALIBRATION_ARMS) or not weights:
+        raise HarnessError("A/A calibration needs baseline and replica arms")
     counts, collected = regime_counts(estimator, protocol)
     if not math.isclose(sum(weights.values()), 1.0):
         raise HarnessError("Cost weights must sum to one")
@@ -113,7 +117,7 @@ def calibrate_cost(
             for case, weight in weights.items():
                 a, b = [
                     cost_estimate(_resample(arms[arm][case], estimator, draws[arm]), estimator)
-                    for arm in ("baseline", "control")
+                    for arm in CALIBRATION_ARMS
                 ]
                 ln_panel += weight * math.log(b / a)
                 absolute[case].append(abs(b - a))
@@ -175,13 +179,12 @@ def _breached(estimate, baseline, weights, threshold):
 
 
 def null_cost_rejections(arms, calibration, replicates=1000, rng_seed=20260925):
-    """Bootstrap the complete three-arm rule: screen, full measurement, fresh rerun.
+    """Bootstrap the complete two-arm rule: screen, full measurement, fresh rerun.
 
-    Cases share round draws within each arm. The two independently built
-    baseline series form the null distribution; the candidate is another
-    independent draw from the control series. Repeated trials retain all
-    within-round calls and all companion seeds. Each regime is a fresh draw,
-    as each is a fresh session on the runner.
+    Cases share round draws within each arm. The candidate is an independent
+    draw from the replica series, so every rejection is a false one. Repeated
+    trials retain all within-round calls and all companion seeds. Each regime
+    is a fresh draw, as each is a fresh session on the runner.
     """
     estimator, weights = calibration["estimator"], calibration["weights"]
     collected = calibration.get("collected", COUNTS[estimator][3])
@@ -190,45 +193,32 @@ def null_cost_rejections(arms, calibration, replicates=1000, rng_seed=20260925):
     def trial(regime):
         threshold = threshold_for(calibration, regime)
         estimates = {}
-        for arm in ("baseline", "control", "evolved"):
+        for arm in CALIBRATION_ARMS:
             indices = rng.choices(range(collected), k=threshold["count"])
-            source = arms["baseline" if arm == "baseline" else "control"]
             estimates[arm] = {
-                case: cost_estimate(_resample(source[case], estimator, indices), estimator)
+                case: cost_estimate(_resample(arms[arm][case], estimator, indices), estimator)
                 for case in weights
             }
-        return tuple(
-            _breached(estimates[arm], estimates["baseline"], weights, threshold)["breached"]
-            for arm in ("control", "evolved")
-        )
+        return _breached(estimates["replica"], estimates["baseline"], weights, threshold)[
+            "breached"
+        ]
 
     rejected = []
     for _ in range(replicates):
-        if "screen" in calibration["regimes"]:
-            control, candidate = trial("screen")
-            if not control and not candidate:
-                rejected.append(False)
-                continue
-        control, candidate = trial("normal")
-        failure = False
-        if candidate and not control:
-            control, candidate = trial("rerun")
-            failure = candidate and not control
-        rejected.append(failure)
+        if "screen" in calibration["regimes"] and not trial("screen"):
+            rejected.append(False)
+            continue
+        rejected.append(trial("normal") and trial("rerun"))
     return rejected
 
 
 def validate_bundle(bundle, calibration, run_id=None, historical=False):
-    if not bundle.get("complete") or set(bundle.get("arms", {})) != {
-        "baseline",
-        "control",
-        "evolved",
-    }:
-        raise Incomplete("Cost panel must contain three complete arms")
+    if not bundle.get("complete") or set(bundle.get("arms", {})) != set(MEASURED_ARMS):
+        raise Incomplete("Cost panel must contain baseline and evolved arms")
     if run_id is not None and bundle["run_id"] != run_id:
         raise Incomplete("Cost observations cannot cross comparisons")
     arms = bundle["arms"]
-    if len({a["arm_id"] for a in arms.values()}) != 3:
+    if len({a["arm_id"] for a in arms.values()}) != len(MEASURED_ARMS):
         raise HarnessError("Distinct cost arm IDs required, even for identical builds")
     if any(a["session_id"] != bundle["session_id"] for a in arms.values()):
         raise HarnessError("Mixed cost sessions")
@@ -257,11 +247,11 @@ def validate_bundle(bundle, calibration, run_id=None, historical=False):
 def cost_guard(bundle, calibration, run_id=None, historical=True):
     """Judge one bundle at its regime.
 
-    ``screen``: ``passed`` when the control is clean and the candidate sits inside
-    the full-count noise band with no cap breach; otherwise ``unresolved`` with
-    ``needs_full`` set, and the panel is measured again at full count in a fresh
-    session. ``normal``: a candidate-only breach sets ``needs_rerun``. ``rerun``:
-    decides ``failed`` or ``passed_on_rerun`` unless the control also breached.
+    ``screen``: ``passed`` when the candidate sits inside the full-count noise
+    band with no cap breach; otherwise ``unresolved`` with ``needs_full`` set, and
+    the panel is measured again at full count in a fresh session. ``normal``: a
+    breach sets ``needs_rerun``. ``rerun``: decides ``failed`` or
+    ``passed_on_rerun``.
     """
     validate_bundle(bundle, calibration, run_id, historical)
     regime = bundle["regime"]
@@ -274,19 +264,15 @@ def cost_guard(bundle, calibration, run_id=None, historical=True):
         }
         for arm, row in bundle["arms"].items()
     }
-    control, candidate = (
-        _breached(estimates[arm], estimates["baseline"], weights, threshold)
-        for arm in ("control", "evolved")
-    )
-    result = "unresolved" if control["breached"] or candidate["breached"] else "passed"
-    if regime == "rerun" and not control["breached"]:
+    candidate = _breached(estimates["evolved"], estimates["baseline"], weights, threshold)
+    result = "unresolved" if candidate["breached"] else "passed"
+    if regime == "rerun":
         result = "failed" if candidate["breached"] else "passed_on_rerun"
     return {
         "result": result,
         "regime": regime,
         "count": threshold["count"],
-        "control": control,
         "candidate": candidate,
         "needs_full": regime == "screen" and result != "passed",
-        "needs_rerun": candidate["breached"] and not control["breached"] and regime == "normal",
+        "needs_rerun": candidate["breached"] and regime == "normal",
     }

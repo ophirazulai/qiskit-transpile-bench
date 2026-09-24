@@ -251,7 +251,7 @@ def preflight(comparison, cases, force=False):
             )
         cost = {}
         for name, (panel, estimator) in cost_panels(comparison, all_panels=True).items():
-            comparison.progress(f"Calibrating {name}: two independent baseline builds.")
+            comparison.progress(f"Calibrating {name}: baseline timed as two interleaved arms.")
             try:
                 cost[name] = calibrate_panel(
                     comparison.run,
@@ -331,7 +331,7 @@ def measure_costs(comparison):
         raise Incomplete("No valid calibration for this run")
     guarded = required_cost_panels(comparison)
     for name, (cases, estimator) in cost_panels(comparison).items():
-        comparison.progress(f"Measuring {name}: fresh interleaved baseline/control/evolved arms.")
+        comparison.progress(f"Measuring {name}: fresh interleaved baseline/evolved arms.")
         try:
             result = measure_panel(
                 comparison.run,

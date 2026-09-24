@@ -165,27 +165,26 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   a doubled rerun and no screen. A timing round is one fresh process per arm that loads,
   warms up (`warmups` = 1 call) and times every case of the panel in manifest order, timing
   each until at least `minimum_calls` (2) calls and `minimum_ns` (1 s) have accumulated; the
-  companion and memory use one fresh process per arm and case. The three arms (baseline,
-  control, evolved) run interleaved in random order within each round. Nothing else may run:
+  companion and memory use one fresh process per arm and case. The two arms (baseline,
+  evolved) run interleaved in random order within each round. Nothing else may run:
   the coordinator takes an exclusive machine lock and refuses to start if the load average is
   above half the core count.
-- **A/A calibration:** the baseline and control builds are measured `calibration_rounds`
-  (30) times each (`calibration_memory_processes` = 10 for memory). 1,000 bootstrap resamples
+- **A/A calibration:** the baseline build is measured as two interleaved arms (`baseline`
+  and `replica`), each in its own fresh processes, `calibration_rounds` (30) times each (`calibration_memory_processes` = 10 for memory). 1,000 bootstrap resamples
   at each regime's sample size give that regime's `noise_panel`, the 95th percentile of
   `|ln_panel|` floored at `ln(1.01)`, and a per-case absolute noise floor. Calibration refuses
-  to freeze if any regime's `noise_panel` exceeds `ln(1.05)`.
+  to freeze if any regime's `noise_panel` exceeds `ln(1.05)`. Both arms run the same wheel,
+  so the band measures run-to-run machine noise only, not build-to-build variation.
 - **Guard:** a panel breaches if `ln_panel > noise_panel`, or if any case is more than 10%
   slower **and** slower by more than its noise floor.
 - **Screen:** the screen passes only when the candidate's `ln_panel` is inside the **full**
   regime's `noise_panel` (the screen's own band is wider) with no per-case breach at the
-  screen's floors, and the control arm is clean. A clear screen is a `passed` panel; anything
+  screen's floors. A clear screen is a `passed` panel; anything
   else discards nothing but proceeds to the full measurement in a fresh session.
-- **Control arm:** if baseline versus control breaches in the full measurement, the machine
-  was noisier than calibrated and the result is `unresolved`, not blamed on the candidate.
-- **One rerun:** if only the candidate breaches, the whole panel is measured once more with
+- **One rerun:** if the candidate breaches in the full measurement, the whole panel is measured once more with
   doubled rounds. A breach again → `failed`; a pass → `passed_on_rerun`.
 - **Null rejection rate:** calibration bootstraps the whole sequence (screen → full → rerun)
-  on the two baseline builds, so the reported cost false-rejection rate includes the screen.
+  on the baseline and replica series, so the reported cost false-rejection rate includes the screen.
 
 Cost is measured only when the improvement test passed and nothing has failed, because it
 needs an exclusive machine and hours of wall time.
