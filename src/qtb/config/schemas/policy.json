@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "qtb-policy/1"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "required_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "quality_prerequisites": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "practical_ratio": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "quality_cap": {
+      "type": "number",
+      "minimum": 1
+    },
+    "improvement_multiplier": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "guard_multiplier": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "measurement_protocol": {
+      "type": "object"
+    },
+    "bootstrap_replicates": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rng_seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "iterations_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0
+    }
+  },
+  "required": [
+    "format",
+    "profile",
+    "version",
+    "required_ids",
+    "quality_prerequisites",
+    "practical_ratio",
+    "quality_cap",
+    "improvement_multiplier",
+    "guard_multiplier",
+    "measurement_protocol",
+    "bootstrap_replicates",
+    "rng_seed",
+    "iterations_groups"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/policy/1"
+}

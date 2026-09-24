@@ -1,0 +1,4536 @@
+[
+  {
+    "probe_id": "qft_n100",
+    "input_group": "qft_n100",
+    "circuit_recipe": "qft_n100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G1",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.189,
+        "D2": [
+          4138,
+          4143,
+          3920
+        ],
+        "N2": [
+          46056,
+          45093,
+          45381
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.03160109908000947
+      },
+      "1": {
+        "t": 0.768,
+        "D2": [
+          3148,
+          2824,
+          3700
+        ],
+        "N2": [
+          25695,
+          26958,
+          27987
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.13595134870064193
+      },
+      "2": {
+        "t": 1.338,
+        "D2": [
+          1983,
+          1811,
+          1873
+        ],
+        "N2": [
+          9835,
+          9430,
+          9561
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.045866295101345746
+      },
+      "3": {
+        "t": 1.755,
+        "D2": [
+          1785,
+          1634,
+          1892
+        ],
+        "N2": [
+          9520,
+          8973,
+          9394
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07381736872429312
+      }
+    }
+  },
+  {
+    "probe_id": "qftbm_14",
+    "input_group": "qft_cp_n14",
+    "circuit_recipe": "qftbm_14",
+    "target_recipe": "melbourne14_u",
+    "target_id": "melbourne_14_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G1",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/qft.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 14,
+    "active_qubits": 14,
+    "baseline_probe": {
+      "0": {
+        "t": 0.006,
+        "D2": [
+          199,
+          182,
+          191
+        ],
+        "N2": [
+          497,
+          464,
+          485
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04469789552192265
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          144,
+          135,
+          130
+        ],
+        "N2": [
+          347,
+          338,
+          338
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.051721233621977315
+      },
+      "2": {
+        "t": 0.033,
+        "D2": [
+          105,
+          131,
+          123
+        ],
+        "N2": [
+          253,
+          282,
+          282
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.11398191975216575
+      },
+      "3": {
+        "t": 0.037,
+        "D2": [
+          147,
+          119,
+          105
+        ],
+        "N2": [
+          287,
+          274,
+          265
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1700641601658341
+      }
+    }
+  },
+  {
+    "probe_id": "ft_qft_32",
+    "input_group": "qft_full_n32",
+    "circuit_recipe": "ft_qft_32",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G1",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.qft_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 32,
+    "active_qubits": 32,
+    "baseline_probe": {
+      "0": {
+        "t": 0.013,
+        "D2": [
+          866,
+          965,
+          758
+        ],
+        "N2": [
+          3746,
+          3860,
+          3557
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12093716359367834
+      },
+      "1": {
+        "t": 0.048,
+        "D2": [
+          510,
+          485,
+          415
+        ],
+        "N2": [
+          2516,
+          2561,
+          2537
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.10748047158982289
+      },
+      "2": {
+        "t": 0.208,
+        "D2": [
+          385,
+          555,
+          373
+        ],
+        "N2": [
+          1531,
+          1884,
+          1576
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.2208603820322017
+      },
+      "3": {
+        "t": 0.243,
+        "D2": [
+          511,
+          348,
+          395
+        ],
+        "N2": [
+          1637,
+          1588,
+          1632
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1957596075796683
+      }
+    }
+  },
+  {
+    "probe_id": "qftbm_8",
+    "input_group": "qft_cp_n8",
+    "circuit_recipe": "qftbm_8",
+    "target_recipe": "melbourne14_u",
+    "target_id": "melbourne_14_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G1",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/qft.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 8,
+    "active_qubits": 8,
+    "baseline_probe": {
+      "0": {
+        "t": 0.006,
+        "D2": [
+          70,
+          89,
+          75
+        ],
+        "N2": [
+          137,
+          149,
+          143
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12363892531591443
+      },
+      "1": {
+        "t": 0.01,
+        "D2": [
+          59,
+          53,
+          60
+        ],
+        "N2": [
+          98,
+          98,
+          95
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.06729678378764023
+      },
+      "2": {
+        "t": 0.015,
+        "D2": [
+          52,
+          32,
+          59
+        ],
+        "N2": [
+          82,
+          70,
+          82
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.32299872805246826
+      },
+      "3": {
+        "t": 0.016,
+        "D2": [
+          36,
+          53,
+          60
+        ],
+        "N2": [
+          75,
+          82,
+          82
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.26643486127087135
+      }
+    }
+  },
+  {
+    "probe_id": "ft_qft_64",
+    "input_group": "qft_full_n64",
+    "circuit_recipe": "ft_qft_64",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G1",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.qft_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 64,
+    "active_qubits": 64,
+    "baseline_probe": {
+      "0": {
+        "t": 0.09,
+        "D2": [
+          2231,
+          2191,
+          2442
+        ],
+        "N2": [
+          16761,
+          16812,
+          17226
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05810481349525637
+      },
+      "1": {
+        "t": 0.29,
+        "D2": [
+          995,
+          1155,
+          1035
+        ],
+        "N2": [
+          10092,
+          9798,
+          9837
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07726789552607645
+      },
+      "2": {
+        "t": 0.629,
+        "D2": [
+          739,
+          1003,
+          885
+        ],
+        "N2": [
+          4252,
+          4830,
+          4481
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.15355327572896213
+      },
+      "3": {
+        "t": 0.923,
+        "D2": [
+          685,
+          947,
+          924
+        ],
+        "N2": [
+          4208,
+          4689,
+          4393
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.18031425378335791
+      }
+    }
+  },
+  {
+    "probe_id": "time_qft_16",
+    "input_group": "qft16_cancel",
+    "circuit_recipe": "time_qft_16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G1",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "guard",
+      "1": "guard",
+      "2": "zero_baseline",
+      "3": "zero_baseline"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          308,
+          307,
+          307
+        ],
+        "N2": [
+          729,
+          702,
+          750
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.001877563505739062
+      },
+      "1": {
+        "t": 0.014,
+        "D2": [
+          161,
+          167,
+          204
+        ],
+        "N2": [
+          552,
+          561,
+          555
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12742551098753452
+      },
+      "2": {
+        "t": 0.008,
+        "D2": [
+          0,
+          0,
+          0
+        ],
+        "N2": [
+          0,
+          0,
+          0
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.011,
+        "D2": [
+          0,
+          0,
+          0
+        ],
+        "N2": [
+          0,
+          0,
+          0
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "square_heisenberg_n100",
+    "input_group": "square_heisenberg_n100",
+    "circuit_recipe": "square_heisenberg_n100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G2",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.043,
+        "D2": [
+          1092,
+          1197,
+          1191
+        ],
+        "N2": [
+          5433,
+          5391,
+          5505
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05161567156813695
+      },
+      "1": {
+        "t": 0.102,
+        "D2": [
+          957,
+          891,
+          999
+        ],
+        "N2": [
+          3747,
+          3558,
+          3693
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05779407935657253
+      },
+      "2": {
+        "t": 0.237,
+        "D2": [
+          498,
+          420,
+          375
+        ],
+        "N2": [
+          1947,
+          1866,
+          1920
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.14278883113797752
+      },
+      "3": {
+        "t": 0.397,
+        "D2": [
+          387,
+          342,
+          348
+        ],
+        "N2": [
+          1683,
+          1587,
+          1644
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.06691542100949414
+      }
+    }
+  },
+  {
+    "probe_id": "ft_trotter_32",
+    "input_group": "trotter_chain_n32",
+    "circuit_recipe": "ft_trotter_32",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G2",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.trotter_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 32,
+    "active_qubits": 32,
+    "baseline_probe": {
+      "0": {
+        "t": 0.019,
+        "D2": [
+          950,
+          747,
+          1020
+        ],
+        "N2": [
+          3840,
+          3411,
+          4056
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.16323447685162842
+      },
+      "1": {
+        "t": 0.017,
+        "D2": [
+          178,
+          178,
+          178
+        ],
+        "N2": [
+          1860,
+          1860,
+          1860
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.038,
+        "D2": [
+          178,
+          178,
+          178
+        ],
+        "N2": [
+          1860,
+          1860,
+          1860
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.067,
+        "D2": [
+          178,
+          178,
+          178
+        ],
+        "N2": [
+          1860,
+          1860,
+          1860
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_trotter_16",
+    "input_group": "trotter_chain_n16",
+    "circuit_recipe": "ft_trotter_16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G2",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.trotter_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.009,
+        "D2": [
+          512,
+          552,
+          497
+        ],
+        "N2": [
+          1647,
+          1584,
+          1605
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.054096973848180685
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.028,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.067,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "dtc_n100",
+    "input_group": "dtc_n100",
+    "circuit_recipe": "dtc_n100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G2",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/qasm/dtc_100_cx_12345.qasm",
+    "roles": {
+      "0": "scored",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.304,
+        "D2": [
+          3497,
+          3950,
+          3622
+        ],
+        "N2": [
+          50316,
+          52656,
+          50295
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0626979585259914
+      },
+      "1": {
+        "t": 0.309,
+        "D2": [
+          400,
+          400,
+          400
+        ],
+        "N2": [
+          19800,
+          19800,
+          19800
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.75,
+        "D2": [
+          400,
+          400,
+          400
+        ],
+        "N2": [
+          19800,
+          19800,
+          19800
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 2.006,
+        "D2": [
+          400,
+          400,
+          400
+        ],
+        "N2": [
+          19800,
+          19800,
+          19800
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "qaoa_ba_n100_3reps",
+    "input_group": "qaoa_ba_n100_3reps",
+    "circuit_recipe": "qaoa_ba_n100_3reps",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G3",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.042,
+        "D2": [
+          2128,
+          2252,
+          2204
+        ],
+        "N2": [
+          14679,
+          14913,
+          14895
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.02858680397555634
+      },
+      "1": {
+        "t": 0.194,
+        "D2": [
+          1496,
+          1612,
+          1604
+        ],
+        "N2": [
+          8922,
+          8949,
+          8796
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04175492664432875
+      },
+      "2": {
+        "t": 0.95,
+        "D2": [
+          1571,
+          1436,
+          1603
+        ],
+        "N2": [
+          8655,
+          8681,
+          8575
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05857072466603009
+      },
+      "3": {
+        "t": 1.443,
+        "D2": [
+          1564,
+          1602,
+          1450
+        ],
+        "N2": [
+          8466,
+          8703,
+          8482
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05202913029151511
+      }
+    }
+  },
+  {
+    "probe_id": "ft_qaoa_8",
+    "input_group": "qaoa_complete_n8",
+    "circuit_recipe": "ft_qaoa_8",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G3",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.qaoa_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 8,
+    "active_qubits": 8,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          696,
+          703,
+          685
+        ],
+        "N2": [
+          1098,
+          1104,
+          1053
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0130812741198808
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          525,
+          521,
+          541
+        ],
+        "N2": [
+          904,
+          889,
+          926
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.019911169905953187
+      },
+      "2": {
+        "t": 0.052,
+        "D2": [
+          427,
+          539,
+          446
+        ],
+        "N2": [
+          755,
+          773,
+          785
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12384363844887838
+      },
+      "3": {
+        "t": 0.059,
+        "D2": [
+          427,
+          539,
+          446
+        ],
+        "N2": [
+          755,
+          773,
+          785
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12384363844887838
+      }
+    }
+  },
+  {
+    "probe_id": "ft_qaoa_16",
+    "input_group": "qaoa_complete_n16",
+    "circuit_recipe": "ft_qaoa_16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G3",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.qaoa_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.019,
+        "D2": [
+          2139,
+          2086,
+          1923
+        ],
+        "N2": [
+          6528,
+          6282,
+          6057
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05564963231501441
+      },
+      "1": {
+        "t": 0.067,
+        "D2": [
+          1688,
+          906,
+          979
+        ],
+        "N2": [
+          4933,
+          4398,
+          4630
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.3391128717092557
+      },
+      "2": {
+        "t": 0.414,
+        "D2": [
+          1154,
+          1085,
+          1105
+        ],
+        "N2": [
+          3781,
+          3672,
+          3748
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.031668732798099695
+      },
+      "3": {
+        "t": 0.558,
+        "D2": [
+          1112,
+          1085,
+          1191
+        ],
+        "N2": [
+          3779,
+          3672,
+          3849
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04831046860388408
+      }
+    }
+  },
+  {
+    "probe_id": "ft_qaoa_32",
+    "input_group": "qaoa_complete_n32",
+    "circuit_recipe": "ft_qaoa_32",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G3",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.qaoa_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 32,
+    "active_qubits": 32,
+    "baseline_probe": {
+      "0": {
+        "t": 0.068,
+        "D2": [
+          5638,
+          6127,
+          6064
+        ],
+        "N2": [
+          32799,
+          32931,
+          33489
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04533348229723115
+      },
+      "1": {
+        "t": 0.268,
+        "D2": [
+          1954,
+          2781,
+          2577
+        ],
+        "N2": [
+          19474,
+          19333,
+          19886
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1857212171812528
+      },
+      "2": {
+        "t": 1.911,
+        "D2": [
+          2233,
+          2423,
+          2016
+        ],
+        "N2": [
+          15036,
+          15018,
+          14977
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.092137095298034
+      },
+      "3": {
+        "t": 2.43,
+        "D2": [
+          2139,
+          2259,
+          2228
+        ],
+        "N2": [
+          14943,
+          15178,
+          15547
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.028378938090798975
+      }
+    }
+  },
+  {
+    "probe_id": "qv_n50_d50",
+    "input_group": "qv_n50_d50",
+    "circuit_recipe": "qv_n50_d50",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G4",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 50,
+    "active_qubits": 50,
+    "baseline_probe": {
+      "0": {
+        "t": 0.109,
+        "D2": [
+          2781,
+          2733,
+          2694
+        ],
+        "N2": [
+          20751,
+          20391,
+          19980
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.01591592641253713
+      },
+      "1": {
+        "t": 0.49,
+        "D2": [
+          2814,
+          2790,
+          2673
+        ],
+        "N2": [
+          17190,
+          17193,
+          16914
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.027541399990620642
+      },
+      "2": {
+        "t": 2.464,
+        "D2": [
+          2505,
+          2538,
+          2523
+        ],
+        "N2": [
+          16311,
+          16239,
+          16278
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.00655347843241562
+      },
+      "3": {
+        "t": 3.889,
+        "D2": [
+          2463,
+          2688,
+          2550
+        ],
+        "N2": [
+          16131,
+          16443,
+          16335
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.044016118822309255
+      }
+    }
+  },
+  {
+    "probe_id": "qv_14_x_14",
+    "input_group": "qv_n14_d14",
+    "circuit_recipe": "qv_14_x_14",
+    "target_recipe": "melbourne14",
+    "target_id": "melbourne_14",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G4",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_levels.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 14,
+    "active_qubits": 14,
+    "baseline_probe": {
+      "0": {
+        "t": 0.012,
+        "D2": [
+          225,
+          288,
+          267
+        ],
+        "N2": [
+          699,
+          717,
+          711
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12646732359636767
+      },
+      "1": {
+        "t": 0.02,
+        "D2": [
+          222,
+          210,
+          207
+        ],
+        "N2": [
+          573,
+          564,
+          561
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.036944210738861005
+      },
+      "2": {
+        "t": 0.055,
+        "D2": [
+          171,
+          201,
+          222
+        ],
+        "N2": [
+          534,
+          537,
+          528
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1317390299789844
+      },
+      "3": {
+        "t": 0.078,
+        "D2": [
+          177,
+          210,
+          213
+        ],
+        "N2": [
+          534,
+          537,
+          519
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.10304165271331246
+      }
+    }
+  },
+  {
+    "probe_id": "qv_w27",
+    "input_group": "qv_n27_d27",
+    "circuit_recipe": "qv_w27",
+    "target_recipe": "mumbai27_loose",
+    "target_id": "mumbai_27_loose",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G4",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/quantum_volume.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 27,
+    "active_qubits": 27,
+    "baseline_probe": {
+      "0": {
+        "t": 0.022,
+        "D2": [
+          849,
+          828,
+          936
+        ],
+        "N2": [
+          3810,
+          3795,
+          3858
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0647763625209522
+      },
+      "1": {
+        "t": 0.069,
+        "D2": [
+          756,
+          771,
+          756
+        ],
+        "N2": [
+          3357,
+          3357,
+          3357
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.011343199228302394
+      },
+      "2": {
+        "t": 0.333,
+        "D2": [
+          738,
+          723,
+          720
+        ],
+        "N2": [
+          3117,
+          3093,
+          3069
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.013220464328542179
+      },
+      "3": {
+        "t": 0.403,
+        "D2": [
+          744,
+          750,
+          645
+        ],
+        "N2": [
+          3114,
+          3111,
+          3108
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.08485404037490679
+      }
+    }
+  },
+  {
+    "probe_id": "qv_50_x_20",
+    "input_group": "qv_n50_d20",
+    "circuit_recipe": "qv_50_x_20",
+    "target_recipe": "rochester53_u",
+    "target_id": "rochester_53_u",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G4",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_levels.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 50,
+    "active_qubits": 50,
+    "baseline_probe": {
+      "0": {
+        "t": 0.045,
+        "D2": [
+          1170,
+          1083,
+          1089
+        ],
+        "N2": [
+          8079,
+          8121,
+          7941
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.043104865586452275
+      },
+      "1": {
+        "t": 0.16,
+        "D2": [
+          990,
+          1137,
+          1113
+        ],
+        "N2": [
+          6684,
+          6831,
+          6786
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07453900077639598
+      },
+      "2": {
+        "t": 0.883,
+        "D2": [
+          960,
+          915,
+          996
+        ],
+        "N2": [
+          6522,
+          6300,
+          6438
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.042534550069065064
+      },
+      "3": {
+        "t": 0.964,
+        "D2": [
+          1011,
+          951,
+          1041
+        ],
+        "N2": [
+          6408,
+          6441,
+          6417
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.046142062701318994
+      }
+    }
+  },
+  {
+    "probe_id": "qv_w14",
+    "input_group": "qv_n14_d14_s10",
+    "circuit_recipe": "qv_w14",
+    "target_recipe": "mumbai27_loose",
+    "target_id": "mumbai_27_loose",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G4",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/quantum_volume.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 14,
+    "active_qubits": 14,
+    "baseline_probe": {
+      "0": {
+        "t": 0.007,
+        "D2": [
+          264,
+          246,
+          240
+        ],
+        "N2": [
+          822,
+          768,
+          798
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04946479605080789
+      },
+      "1": {
+        "t": 0.018,
+        "D2": [
+          192,
+          189,
+          177
+        ],
+        "N2": [
+          660,
+          648,
+          633
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0431434183371617
+      },
+      "2": {
+        "t": 0.059,
+        "D2": [
+          198,
+          201,
+          168
+        ],
+        "N2": [
+          600,
+          600,
+          561
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0994860116719813
+      },
+      "3": {
+        "t": 0.067,
+        "D2": [
+          189,
+          171,
+          165
+        ],
+        "N2": [
+          600,
+          594,
+          567
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07039713379898443
+      }
+    }
+  },
+  {
+    "probe_id": "ripple_10",
+    "input_group": "ripple_adder_10",
+    "circuit_recipe": "ripple_10",
+    "target_recipe": "grid5",
+    "target_id": "grid_5x5_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/ripple_adder.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 22,
+    "active_qubits": 22,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          280,
+          309,
+          292
+        ],
+        "N2": [
+          537,
+          513,
+          498
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.049456325321188745
+      },
+      "1": {
+        "t": 0.011,
+        "D2": [
+          288,
+          228,
+          222
+        ],
+        "N2": [
+          411,
+          408,
+          390
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.143198222368346
+      },
+      "2": {
+        "t": 0.028,
+        "D2": [
+          192,
+          229,
+          206
+        ],
+        "N2": [
+          346,
+          350,
+          344
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0887060904983562
+      },
+      "3": {
+        "t": 0.037,
+        "D2": [
+          206,
+          191,
+          189
+        ],
+        "N2": [
+          361,
+          332,
+          343
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04698370444536053
+      }
+    }
+  },
+  {
+    "probe_id": "depth_mod8_10_178",
+    "input_group": "revlib_mod8_10_178",
+    "circuit_recipe": "depth_mod8_10_178",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 6,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          440,
+          413,
+          438
+        ],
+        "N2": [
+          485,
+          458,
+          488
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.03532031782967178
+      },
+      "1": {
+        "t": 0.01,
+        "D2": [
+          369,
+          374,
+          386
+        ],
+        "N2": [
+          416,
+          395,
+          410
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.02312001820018295
+      },
+      "2": {
+        "t": 0.029,
+        "D2": [
+          344,
+          338,
+          332
+        ],
+        "N2": [
+          365,
+          359,
+          355
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.01775357734913653
+      },
+      "3": {
+        "t": 0.052,
+        "D2": [
+          344,
+          338,
+          340
+        ],
+        "N2": [
+          365,
+          359,
+          364
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.008955583954746696
+      }
+    }
+  },
+  {
+    "probe_id": "depth_4gt10_v1_81",
+    "input_group": "revlib_4gt10_v1_81",
+    "circuit_recipe": "depth_4gt10_v1_81",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 5,
+    "baseline_probe": {
+      "0": {
+        "t": 0.003,
+        "D2": [
+          185,
+          181,
+          186
+        ],
+        "N2": [
+          201,
+          192,
+          192
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.014430356483534329
+      },
+      "1": {
+        "t": 0.01,
+        "D2": [
+          152,
+          156,
+          156
+        ],
+        "N2": [
+          159,
+          159,
+          159
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.014996954067253994
+      },
+      "2": {
+        "t": 0.017,
+        "D2": [
+          148,
+          146,
+          148
+        ],
+        "N2": [
+          151,
+          151,
+          151
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.007855226876904016
+      },
+      "3": {
+        "t": 0.026,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          151,
+          149,
+          149
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_multiplier_32",
+    "input_group": "multiplier_h18_n32",
+    "circuit_recipe": "ft_multiplier_32",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.multiplier_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 32,
+    "active_qubits": 32,
+    "baseline_probe": {
+      "0": {
+        "t": 0.06,
+        "D2": [
+          9914,
+          9804,
+          10038
+        ],
+        "N2": [
+          14470,
+          13966,
+          14764
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.011799432676062373
+      },
+      "1": {
+        "t": 0.126,
+        "D2": [
+          7098,
+          6955,
+          7131
+        ],
+        "N2": [
+          9834,
+          9541,
+          10046
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.013293236728512523
+      },
+      "2": {
+        "t": 0.548,
+        "D2": [
+          5990,
+          6052,
+          6201
+        ],
+        "N2": [
+          8255,
+          8346,
+          8580
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.01777672084721709
+      },
+      "3": {
+        "t": 0.663,
+        "D2": [
+          6161,
+          6134,
+          6015
+        ],
+        "N2": [
+          8581,
+          8695,
+          8217
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.012768832950834134
+      }
+    }
+  },
+  {
+    "probe_id": "ft_mcx_16",
+    "input_group": "mcx_kg24_n16",
+    "circuit_recipe": "ft_mcx_16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.mcx_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.003,
+        "D2": [
+          303,
+          282,
+          237
+        ],
+        "N2": [
+          417,
+          432,
+          348
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1263175556348365
+      },
+      "1": {
+        "t": 0.008,
+        "D2": [
+          133,
+          136,
+          136
+        ],
+        "N2": [
+          201,
+          201,
+          198
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.012878235105358838
+      },
+      "2": {
+        "t": 0.02,
+        "D2": [
+          106,
+          114,
+          124
+        ],
+        "N2": [
+          152,
+          160,
+          172
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0784893358992808
+      },
+      "3": {
+        "t": 0.028,
+        "D2": [
+          106,
+          110,
+          123
+        ],
+        "N2": [
+          152,
+          159,
+          175
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0774327556046709
+      }
+    }
+  },
+  {
+    "probe_id": "ripple_20",
+    "input_group": "ripple_adder_20",
+    "circuit_recipe": "ripple_20",
+    "target_recipe": "grid7",
+    "target_id": "grid_7x7_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/ripple_adder.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 42,
+    "active_qubits": 42,
+    "baseline_probe": {
+      "0": {
+        "t": 0.007,
+        "D2": [
+          647,
+          651,
+          694
+        ],
+        "N2": [
+          1266,
+          1314,
+          1314
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.03883034477017087
+      },
+      "1": {
+        "t": 0.02,
+        "D2": [
+          521,
+          536,
+          521
+        ],
+        "N2": [
+          894,
+          912,
+          909
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.01638757892863156
+      },
+      "2": {
+        "t": 0.08,
+        "D2": [
+          418,
+          471,
+          424
+        ],
+        "N2": [
+          792,
+          834,
+          763
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.06519853927262542
+      },
+      "3": {
+        "t": 0.087,
+        "D2": [
+          651,
+          387,
+          430
+        ],
+        "N2": [
+          781,
+          758,
+          790
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.274950161660032
+      }
+    }
+  },
+  {
+    "probe_id": "time_cnt3_5_179",
+    "input_group": "revlib_cnt3_5_179",
+    "circuit_recipe": "time_cnt3_5_179",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.004,
+        "D2": [
+          169,
+          196,
+          154
+        ],
+        "N2": [
+          301,
+          313,
+          295
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12163201581390001
+      },
+      "1": {
+        "t": 0.007,
+        "D2": [
+          123,
+          132,
+          123
+        ],
+        "N2": [
+          195,
+          198,
+          192
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04077107144049255
+      },
+      "2": {
+        "t": 0.029,
+        "D2": [
+          108,
+          120,
+          107
+        ],
+        "N2": [
+          162,
+          179,
+          170
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.06368536633764423
+      },
+      "3": {
+        "t": 0.036,
+        "D2": [
+          107,
+          117,
+          106
+        ],
+        "N2": [
+          163,
+          179,
+          163
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05449660989928495
+      }
+    }
+  },
+  {
+    "probe_id": "time_cnt3_5_180",
+    "input_group": "revlib_cnt3_5_180",
+    "circuit_recipe": "time_cnt3_5_180",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          510,
+          625,
+          572
+        ],
+        "N2": [
+          773,
+          815,
+          812
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.10194958684174024
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          407,
+          408,
+          435
+        ],
+        "N2": [
+          562,
+          556,
+          571
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.03772431021146595
+      },
+      "2": {
+        "t": 0.049,
+        "D2": [
+          365,
+          367,
+          402
+        ],
+        "N2": [
+          498,
+          483,
+          516
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05423730186857764
+      },
+      "3": {
+        "t": 0.075,
+        "D2": [
+          340,
+          357,
+          356
+        ],
+        "N2": [
+          485,
+          476,
+          501
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.02739519139754826
+      }
+    }
+  },
+  {
+    "probe_id": "ft_modular_adder_32",
+    "input_group": "adder_modular_v17_n32",
+    "circuit_recipe": "ft_modular_adder_32",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.modular_adder_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 32,
+    "active_qubits": 32,
+    "baseline_probe": {
+      "0": {
+        "t": 0.009,
+        "D2": [
+          1065,
+          1009,
+          1042
+        ],
+        "N2": [
+          1794,
+          1638,
+          1734
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.027172271972012337
+      },
+      "1": {
+        "t": 0.015,
+        "D2": [
+          702,
+          761,
+          659
+        ],
+        "N2": [
+          827,
+          974,
+          823
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07213183233212128
+      },
+      "2": {
+        "t": 0.042,
+        "D2": [
+          579,
+          612,
+          606
+        ],
+        "N2": [
+          710,
+          742,
+          701
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.029571496133791862
+      },
+      "3": {
+        "t": 0.069,
+        "D2": [
+          577,
+          619,
+          607
+        ],
+        "N2": [
+          661,
+          718,
+          698
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.03626121077422285
+      }
+    }
+  },
+  {
+    "probe_id": "ft_multiplier_16",
+    "input_group": "multiplier_h18_n16",
+    "circuit_recipe": "ft_multiplier_16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "B",
+    "source": "test/benchmarks/utils.multiplier_circuit",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.019,
+        "D2": [
+          2373,
+          2351,
+          2359
+        ],
+        "N2": [
+          3401,
+          3335,
+          3398
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.004713584471528668
+      },
+      "1": {
+        "t": 0.036,
+        "D2": [
+          1634,
+          1673,
+          1608
+        ],
+        "N2": [
+          2251,
+          2179,
+          2085
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.019933061707525138
+      },
+      "2": {
+        "t": 0.15,
+        "D2": [
+          1413,
+          1433,
+          1431
+        ],
+        "N2": [
+          1854,
+          1881,
+          1817
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.007743060675554275
+      },
+      "3": {
+        "t": 0.232,
+        "D2": [
+          1396,
+          1439,
+          1454
+        ],
+        "N2": [
+          1826,
+          1877,
+          1852
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0211541387492719
+      }
+    }
+  },
+  {
+    "probe_id": "depth_4mod5_v0_19",
+    "input_group": "revlib_4mod5_v0_19",
+    "circuit_recipe": "depth_4mod5_v0_19",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_qualitative.py",
+    "roles": {
+      "0": "guard",
+      "1": "guard",
+      "2": "guard",
+      "3": "guard"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 5,
+    "baseline_probe": {
+      "0": {
+        "t": 0.003,
+        "D2": [
+          49,
+          52,
+          49
+        ],
+        "N2": [
+          49,
+          52,
+          52
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.034308127804985315
+      },
+      "1": {
+        "t": 0.006,
+        "D2": [
+          40,
+          34,
+          36
+        ],
+        "N2": [
+          40,
+          37,
+          37
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.08244222722355792
+      },
+      "2": {
+        "t": 0.012,
+        "D2": [
+          34,
+          37,
+          34
+        ],
+        "N2": [
+          37,
+          37,
+          35
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.048819230739973685
+      },
+      "3": {
+        "t": 0.012,
+        "D2": [
+          37,
+          34,
+          32
+        ],
+        "N2": [
+          37,
+          37,
+          33
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07291903343549612
+      }
+    }
+  },
+  {
+    "probe_id": "hwb12",
+    "input_group": "hwb12",
+    "circuit_recipe": "hwb12",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "2": "guard"
+    },
+    "seeds": {
+      "2": 20
+    },
+    "logical_qubits": 20,
+    "active_qubits": 20,
+    "baseline_probe": {
+      "0": {
+        "t": 5.057,
+        "D2": [
+          548802
+        ],
+        "N2": [
+          957493
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 14.13,
+        "D2": [
+          431983
+        ],
+        "N2": [
+          713064
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 49.49,
+        "D2": [
+          386479
+        ],
+        "N2": [
+          645222
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 72.776,
+        "D2": [
+          384250
+        ],
+        "N2": [
+          641851
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "bv_all_ones_n100",
+    "input_group": "bv_all_ones_n100",
+    "circuit_recipe": "bv_all_ones_n100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G6",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.012,
+        "D2": [
+          922,
+          910,
+          891
+        ],
+        "N2": [
+          1677,
+          1644,
+          1665
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.017255617749057067
+      },
+      "1": {
+        "t": 0.083,
+        "D2": [
+          697,
+          795,
+          780
+        ],
+        "N2": [
+          852,
+          939,
+          918
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07109637197863539
+      },
+      "2": {
+        "t": 0.097,
+        "D2": [
+          632,
+          702,
+          634
+        ],
+        "N2": [
+          790,
+          861,
+          749
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.059755987009179
+      },
+      "3": {
+        "t": 0.583,
+        "D2": [
+          544,
+          550,
+          537
+        ],
+        "N2": [
+          639,
+          628,
+          674
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.011973771234188151
+      }
+    }
+  },
+  {
+    "probe_id": "bv_all_ones_n16",
+    "input_group": "bv_all_ones_n16",
+    "circuit_recipe": "bv_all_ones_n16",
+    "target_recipe": "mumbai27",
+    "target_id": "mumbai_27",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G6",
+    "provenance_grade": "C",
+    "source": "test/benchmarks/utils.bv_all_ones",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.003,
+        "D2": [
+          73,
+          79,
+          82
+        ],
+        "N2": [
+          114,
+          114,
+          117
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05936422675718405
+      },
+      "1": {
+        "t": 0.005,
+        "D2": [
+          47,
+          48,
+          54
+        ],
+        "N2": [
+          54,
+          60,
+          57
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0748238464072362
+      },
+      "2": {
+        "t": 0.009,
+        "D2": [
+          41,
+          49,
+          52
+        ],
+        "N2": [
+          48,
+          51,
+          55
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12368736731906564
+      },
+      "3": {
+        "t": 0.011,
+        "D2": [
+          41,
+          49,
+          52
+        ],
+        "N2": [
+          48,
+          51,
+          55
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.12368736731906564
+      }
+    }
+  },
+  {
+    "probe_id": "bv_all_ones_n50",
+    "input_group": "bv_all_ones_n50",
+    "circuit_recipe": "bv_all_ones_n50",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G6",
+    "provenance_grade": "C",
+    "source": "test/benchmarks/utils.bv_all_ones",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 50,
+    "active_qubits": 50,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          286,
+          313,
+          320
+        ],
+        "N2": [
+          457,
+          472,
+          487
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05950509241118546
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          219,
+          213,
+          225
+        ],
+        "N2": [
+          223,
+          217,
+          247
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.02740497552368866
+      },
+      "2": {
+        "t": 0.024,
+        "D2": [
+          184,
+          190,
+          183
+        ],
+        "N2": [
+          187,
+          191,
+          186
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.02028321765106688
+      },
+      "3": {
+        "t": 0.028,
+        "D2": [
+          186,
+          190,
+          183
+        ],
+        "N2": [
+          186,
+          191,
+          186
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.01882475148357753
+      }
+    }
+  },
+  {
+    "probe_id": "bvlike_n100",
+    "input_group": "bvlike_n100",
+    "circuit_recipe": "bvlike_n100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G6",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "guard",
+      "1": "guard",
+      "2": "zero_baseline",
+      "3": "zero_baseline"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.012,
+        "D2": [
+          1679,
+          1686,
+          1695
+        ],
+        "N2": [
+          3018,
+          3015,
+          3057
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0047540588676314435
+      },
+      "1": {
+        "t": 0.082,
+        "D2": [
+          1301,
+          1447,
+          1244
+        ],
+        "N2": [
+          1518,
+          1611,
+          1500
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.07764118355255613
+      },
+      "2": {
+        "t": 0.013,
+        "D2": [
+          0,
+          0,
+          0
+        ],
+        "N2": [
+          0,
+          0,
+          0
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.014,
+        "D2": [
+          0,
+          0,
+          0
+        ],
+        "N2": [
+          0,
+          0,
+          0
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "su2_circ_89",
+    "input_group": "su2_circular_n89",
+    "circuit_recipe": "su2_circ_89",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G7",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "guard"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 10
+    },
+    "logical_qubits": 89,
+    "active_qubits": 89,
+    "baseline_probe": {
+      "0": {
+        "t": 0.1,
+        "D2": [
+          1841
+        ],
+        "N2": [
+          3291
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.195,
+        "D2": [
+          1505
+        ],
+        "N2": [
+          1800
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 6.821,
+        "D2": [
+          1464
+        ],
+        "N2": [
+          1821
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 39.669,
+        "D2": [
+          1219
+        ],
+        "N2": [
+          1392
+        ],
+        "seed_sensitive": null,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ring_8",
+    "input_group": "ring_random_n8",
+    "circuit_recipe": "ring_8",
+    "target_recipe": "melbourne14_u",
+    "target_id": "melbourne_14_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G7",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/random_circuit_hex.py",
+    "roles": {
+      "0": "scored",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 8,
+    "active_qubits": 8,
+    "baseline_probe": {
+      "0": {
+        "t": 0.008,
+        "D2": [
+          59,
+          89,
+          112
+        ],
+        "N2": [
+          154,
+          190,
+          244
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.32472312509824935
+      },
+      "1": {
+        "t": 0.005,
+        "D2": [
+          16,
+          16,
+          16
+        ],
+        "N2": [
+          64,
+          64,
+          64
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.011,
+        "D2": [
+          16,
+          16,
+          16
+        ],
+        "N2": [
+          64,
+          64,
+          64
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.011,
+        "D2": [
+          16,
+          16,
+          16
+        ],
+        "N2": [
+          64,
+          64,
+          64
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ring_14",
+    "input_group": "ring_random_n14",
+    "circuit_recipe": "ring_14",
+    "target_recipe": "melbourne14_u",
+    "target_id": "melbourne_14_u",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G7",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/random_circuit_hex.py",
+    "roles": {
+      "0": "scored",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 14,
+    "active_qubits": 14,
+    "baseline_probe": {
+      "0": {
+        "t": 0.009,
+        "D2": [
+          99,
+          108,
+          107
+        ],
+        "N2": [
+          307,
+          322,
+          319
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04777761065614042
+      },
+      "1": {
+        "t": 0.019,
+        "D2": [
+          84,
+          84,
+          84
+        ],
+        "N2": [
+          280,
+          280,
+          280
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.031,
+        "D2": [
+          84,
+          84,
+          84
+        ],
+        "N2": [
+          280,
+          280,
+          280
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.03,
+        "D2": [
+          84,
+          84,
+          84
+        ],
+        "N2": [
+          280,
+          280,
+          280
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "su2_circ_100",
+    "input_group": "su2_circular_n100",
+    "circuit_recipe": "su2_circ_100",
+    "target_recipe": "hh9_cz",
+    "target_id": "heavy_hex_d9_cz",
+    "topology": "heavy_hex",
+    "native_basis": "cz",
+    "family": "G7",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/utility_scale.py",
+    "roles": {
+      "0": "scored",
+      "1": "canary",
+      "2": "canary",
+      "3": "canary"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 100,
+    "active_qubits": 100,
+    "baseline_probe": {
+      "0": {
+        "t": 0.02,
+        "D2": [
+          2208,
+          2266,
+          2198
+        ],
+        "N2": [
+          4038,
+          3966,
+          4047
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.016437951600177445
+      },
+      "1": {
+        "t": 0.017,
+        "D2": [
+          300,
+          300,
+          300
+        ],
+        "N2": [
+          300,
+          300,
+          300
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.033,
+        "D2": [
+          300,
+          300,
+          300
+        ],
+        "N2": [
+          300,
+          300,
+          300
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.678,
+        "D2": [
+          300,
+          300,
+          300
+        ],
+        "N2": [
+          300,
+          300,
+          300
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bss_53_sabre",
+    "input_group": "queko_bss_53",
+    "circuit_recipe": "queko_bss_53",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 53,
+    "active_qubits": 53,
+    "baseline_probe": {
+      "0": {
+        "t": 0.038,
+        "D2": [
+          379,
+          590,
+          437
+        ],
+        "N2": [
+          2324,
+          2720,
+          2747
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.22593258758944001
+      },
+      "1": {
+        "t": 0.045,
+        "D2": [
+          347,
+          416,
+          377
+        ],
+        "N2": [
+          1917,
+          1906,
+          1874
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.09079084547785897
+      },
+      "2": {
+        "t": 0.171,
+        "D2": [
+          277,
+          286,
+          237
+        ],
+        "N2": [
+          1132,
+          1183,
+          1070
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.10055128736226038
+      },
+      "3": {
+        "t": 0.201,
+        "D2": [
+          187,
+          198,
+          181
+        ],
+        "N2": [
+          979,
+          965,
+          981
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04544090041790968
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bigd_20_sabre",
+    "input_group": "queko_bigd_20",
+    "circuit_recipe": "queko_bigd_20",
+    "target_recipe": "tokyo20",
+    "target_id": "tokyo_20",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 20,
+    "active_qubits": 9,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          58,
+          59,
+          63
+        ],
+        "N2": [
+          69,
+          63,
+          66
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.04365230614528113
+      },
+      "1": {
+        "t": 0.007,
+        "D2": [
+          33,
+          35,
+          37
+        ],
+        "N2": [
+          33,
+          36,
+          38
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.05721296656197698
+      },
+      "2": {
+        "t": 0.009,
+        "D2": [
+          20,
+          20,
+          21
+        ],
+        "N2": [
+          23,
+          23,
+          21
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.028169014417027693
+      },
+      "3": {
+        "t": 0.009,
+        "D2": [
+          20,
+          20,
+          21
+        ],
+        "N2": [
+          23,
+          23,
+          21
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.028169014417027693
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bntf_54_sabre",
+    "input_group": "queko_bntf_54",
+    "circuit_recipe": "queko_bntf_54",
+    "target_recipe": "sycamore54",
+    "target_id": "sycamore_54",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "scored",
+      "1": "scored",
+      "2": "scored",
+      "3": "scored"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 100,
+      "2": 100,
+      "3": 100
+    },
+    "logical_qubits": 54,
+    "active_qubits": 54,
+    "baseline_probe": {
+      "0": {
+        "t": 0.025,
+        "D2": [
+          165,
+          120,
+          158
+        ],
+        "N2": [
+          873,
+          717,
+          843
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.17271067323264158
+      },
+      "1": {
+        "t": 0.028,
+        "D2": [
+          96,
+          114,
+          101
+        ],
+        "N2": [
+          537,
+          590,
+          610
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.08828949101185428
+      },
+      "2": {
+        "t": 0.103,
+        "D2": [
+          111,
+          120,
+          125
+        ],
+        "N2": [
+          508,
+          501,
+          496
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.06035169924040433
+      },
+      "3": {
+        "t": 0.116,
+        "D2": [
+          88,
+          74,
+          98
+        ],
+        "N2": [
+          451,
+          403,
+          474
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.1417236744681191
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bss_53",
+    "input_group": "queko_bss_53",
+    "circuit_recipe": "queko_bss_53",
+    "target_recipe": "rochester53_sx",
+    "target_id": "rochester_53",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "guard",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 53,
+    "active_qubits": 53,
+    "baseline_probe": {
+      "0": {
+        "t": 0.022,
+        "D2": [
+          919,
+          913,
+          931
+        ],
+        "N2": [
+          6062,
+          5840,
+          5858
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.009936225253624552
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          56,
+          56,
+          56
+        ],
+        "N2": [
+          647,
+          647,
+          647
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.028,
+        "D2": [
+          46,
+          46,
+          46
+        ],
+        "N2": [
+          363,
+          363,
+          363
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.033,
+        "D2": [
+          46,
+          46,
+          46
+        ],
+        "N2": [
+          355,
+          355,
+          355
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bigd_20",
+    "input_group": "queko_bigd_20",
+    "circuit_recipe": "queko_bigd_20",
+    "target_recipe": "tokyo20",
+    "target_id": "tokyo_20",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "guard",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 20,
+    "active_qubits": 9,
+    "baseline_probe": {
+      "0": {
+        "t": 0.006,
+        "D2": [
+          92,
+          88,
+          86
+        ],
+        "N2": [
+          99,
+          105,
+          102
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.0342850878643556
+      },
+      "1": {
+        "t": 0.008,
+        "D2": [
+          23,
+          23,
+          23
+        ],
+        "N2": [
+          23,
+          23,
+          23
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.012,
+        "D2": [
+          17,
+          17,
+          17
+        ],
+        "N2": [
+          17,
+          17,
+          17
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 5.438959822042073e-16
+      },
+      "3": {
+        "t": 0.011,
+        "D2": [
+          17,
+          17,
+          17
+        ],
+        "N2": [
+          17,
+          17,
+          17
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 5.438959822042073e-16
+      }
+    }
+  },
+  {
+    "probe_id": "queko_bntf_54",
+    "input_group": "queko_bntf_54",
+    "circuit_recipe": "queko_bntf_54",
+    "target_recipe": "sycamore54",
+    "target_id": "sycamore_54",
+    "topology": "grid",
+    "native_basis": "cx",
+    "family": "G8",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/queko.py",
+    "roles": {
+      "0": "guard",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 100,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 54,
+    "active_qubits": 54,
+    "baseline_probe": {
+      "0": {
+        "t": 0.021,
+        "D2": [
+          280,
+          382,
+          326
+        ],
+        "N2": [
+          1506,
+          1647,
+          1599
+        ],
+        "seed_sensitive": true,
+        "sd_lnD2": 0.15532654382607092
+      },
+      "1": {
+        "t": 0.012,
+        "D2": [
+          18,
+          18,
+          18
+        ],
+        "N2": [
+          190,
+          190,
+          190
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 5.438959822042073e-16
+      },
+      "2": {
+        "t": 0.016,
+        "D2": [
+          18,
+          18,
+          18
+        ],
+        "N2": [
+          172,
+          172,
+          172
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 5.438959822042073e-16
+      },
+      "3": {
+        "t": 0.019,
+        "D2": [
+          18,
+          18,
+          18
+        ],
+        "N2": [
+          172,
+          172,
+          172
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 5.438959822042073e-16
+      }
+    }
+  },
+  {
+    "probe_id": "long_2q_sequence",
+    "input_group": "long_2q_sequence",
+    "circuit_recipe": "long_2q_sequence",
+    "target_recipe": "rochester53_u",
+    "target_id": "rochester_53_u",
+    "topology": "heavy_hex",
+    "native_basis": "cx",
+    "family": "canary",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_levels.py",
+    "roles": {
+      "2": "canary",
+      "3": "canary"
+    },
+    "seeds": {
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 2,
+    "active_qubits": 2,
+    "baseline_probe": {
+      "0": {
+        "t": 0.005,
+        "D2": [
+          1002,
+          1002,
+          1002
+        ],
+        "N2": [
+          1002,
+          1002,
+          1002
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.01,
+        "D2": [
+          1002,
+          1002,
+          1002
+        ],
+        "N2": [
+          1002,
+          1002,
+          1002
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.008,
+        "D2": [
+          3,
+          3,
+          3
+        ],
+        "N2": [
+          3,
+          3,
+          3
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.01,
+        "D2": [
+          3,
+          3,
+          3
+        ],
+        "N2": [
+          3,
+          3,
+          3
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_qft_16",
+    "input_group": "a2a_qft_n16",
+    "circuit_recipe": "ft_qft_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G1",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.002,
+        "D2": [
+          58,
+          58,
+          58
+        ],
+        "N2": [
+          240,
+          240,
+          240
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.003,
+        "D2": [
+          58,
+          58,
+          58
+        ],
+        "N2": [
+          240,
+          240,
+          240
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.012,
+        "D2": [
+          58,
+          58,
+          58
+        ],
+        "N2": [
+          238,
+          238,
+          238
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.016,
+        "D2": [
+          58,
+          58,
+          58
+        ],
+        "N2": [
+          238,
+          238,
+          238
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_trotter_16",
+    "input_group": "a2a_trotter_n16",
+    "circuit_recipe": "ft_trotter_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G2",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.004,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.008,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.028,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.036,
+        "D2": [
+          146,
+          146,
+          146
+        ],
+        "N2": [
+          900,
+          900,
+          900
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_qaoa_16",
+    "input_group": "a2a_qaoa_n16",
+    "circuit_recipe": "ft_qaoa_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G3",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.004,
+        "D2": [
+          324,
+          324,
+          324
+        ],
+        "N2": [
+          2100,
+          2100,
+          2100
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "1": {
+        "t": 0.008,
+        "D2": [
+          324,
+          324,
+          324
+        ],
+        "N2": [
+          2100,
+          2100,
+          2100
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "2": {
+        "t": 0.051,
+        "D2": [
+          324,
+          324,
+          324
+        ],
+        "N2": [
+          2100,
+          2100,
+          2100
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "3": {
+        "t": 0.08,
+        "D2": [
+          324,
+          324,
+          324
+        ],
+        "N2": [
+          2100,
+          2100,
+          2100
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_multiplier_16",
+    "input_group": "a2a_multiplier_n16",
+    "circuit_recipe": "ft_multiplier_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.007,
+        "D2": [
+          706,
+          706,
+          706
+        ],
+        "N2": [
+          812,
+          812,
+          812
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "1": {
+        "t": 0.013,
+        "D2": [
+          706,
+          706,
+          706
+        ],
+        "N2": [
+          808,
+          808,
+          808
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "2": {
+        "t": 0.06,
+        "D2": [
+          698,
+          698,
+          698
+        ],
+        "N2": [
+          800,
+          800,
+          800
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      },
+      "3": {
+        "t": 0.09,
+        "D2": [
+          698,
+          698,
+          698
+        ],
+        "N2": [
+          800,
+          800,
+          800
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 1.0877919644084146e-15
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_modular_adder_16",
+    "input_group": "a2a_adder_modular_n16",
+    "circuit_recipe": "ft_modular_adder_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.002,
+        "D2": [
+          109,
+          109,
+          109
+        ],
+        "N2": [
+          115,
+          115,
+          115
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.002,
+        "D2": [
+          109,
+          109,
+          109
+        ],
+        "N2": [
+          115,
+          115,
+          115
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.009,
+        "D2": [
+          107,
+          107,
+          107
+        ],
+        "N2": [
+          113,
+          113,
+          113
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.013,
+        "D2": [
+          107,
+          107,
+          107
+        ],
+        "N2": [
+          113,
+          113,
+          113
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  },
+  {
+    "probe_id": "ft_a2a_mcx_16",
+    "input_group": "a2a_mcx_n16",
+    "circuit_recipe": "ft_mcx_16",
+    "target_recipe": "ft_a2a_16",
+    "target_id": "a2a_clifford_rz_16",
+    "topology": "all_to_all",
+    "native_basis": "clifford_2q",
+    "family": "G5",
+    "provenance_grade": "A",
+    "source": "test/benchmarks/transpiler_ft.py",
+    "roles": {
+      "0": "deterministic",
+      "1": "deterministic",
+      "2": "deterministic",
+      "3": "deterministic"
+    },
+    "seeds": {
+      "0": 10,
+      "1": 10,
+      "2": 10,
+      "3": 10
+    },
+    "logical_qubits": 16,
+    "active_qubits": 16,
+    "baseline_probe": {
+      "0": {
+        "t": 0.001,
+        "D2": [
+          68,
+          68,
+          68
+        ],
+        "N2": [
+          78,
+          78,
+          78
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "1": {
+        "t": 0.002,
+        "D2": [
+          68,
+          68,
+          68
+        ],
+        "N2": [
+          78,
+          78,
+          78
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "2": {
+        "t": 0.008,
+        "D2": [
+          68,
+          68,
+          68
+        ],
+        "N2": [
+          78,
+          78,
+          78
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      },
+      "3": {
+        "t": 0.011,
+        "D2": [
+          68,
+          68,
+          68
+        ],
+        "N2": [
+          78,
+          78,
+          78
+        ],
+        "seed_sensitive": false,
+        "sd_lnD2": 0.0
+      }
+    }
+  }
+]

@@ -1,0 +1,2 @@
+# Trusted semantic verifier, installed independently from both revisions.
+qiskit==2.5.2

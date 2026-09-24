@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "qtb-worker/1"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "unsupported",
+        "error"
+      ]
+    },
+    "mode": {
+      "type": "string"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "protocol",
+    "status",
+    "mode",
+    "seed"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/result/1"
+}

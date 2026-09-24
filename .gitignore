@@ -48,3 +48,7 @@ Thumbs.db
 .env.*
 
 design/
+
+# Local benchmark evidence and source/build archives
+results/
+repro/

@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "harness",
+        "correctness",
+        "guard",
+        "cost",
+        "improvement",
+        "completeness"
+      ]
+    },
+    "subject": {
+      "enum": [
+        "evolved",
+        "reference"
+      ]
+    },
+    "result": {
+      "enum": [
+        "passed",
+        "passed_on_rerun",
+        "failed",
+        "unresolved",
+        "not_evaluated"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "subject",
+    "result"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/constraint/1"
+}

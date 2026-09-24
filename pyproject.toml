@@ -12,22 +12,29 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-dependencies = [
-    "qiskit>=2.5",
-]
+dependencies = ["jsonschema>=4.23,<5"]
 
-# Uncomment once src/qtb/cli.py exists.
-# [project.scripts]
-# qiskit-transpile-bench = "qtb.cli:main"
+[project.scripts]
+qiskit-transpile-bench = "qtb.cli:main"
+
+[project.optional-dependencies]
+verifier = ["qiskit==2.5.2", "numpy==2.3.3", "sympy==1.14.0"]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+    "qiskit==2.5.2",
+    "sympy==1.14.0",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qtb"]
+packages = ["src/qtb", "worker/qtb_worker", "verifier/qtb_verifier"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"profiles" = "qtb/data/profiles"
+"fixtures" = "qtb/data/fixtures"
+"envs" = "qtb/data/envs"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -36,7 +43,7 @@ addopts = ["-ra", "--strict-markers"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "worker", "verifier", "tests"]
 extend-exclude = ["design"]
 
 [tool.ruff.lint]

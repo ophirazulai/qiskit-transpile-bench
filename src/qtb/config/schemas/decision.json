@@ -1,0 +1,98 @@
+{
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "qtb-decision/1"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "NO_IMPROVEMENT",
+        "CONSTRAINT_VIOLATION",
+        "INCONCLUSIVE",
+        "ERROR"
+      ]
+    },
+    "improved_under_constraints": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "profile": {
+      "type": "string"
+    },
+    "hashes": {
+      "type": "object"
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "harness",
+              "correctness",
+              "guard",
+              "cost",
+              "improvement",
+              "completeness"
+            ]
+          },
+          "subject": {
+            "enum": [
+              "evolved",
+              "reference"
+            ]
+          },
+          "result": {
+            "enum": [
+              "passed",
+              "passed_on_rerun",
+              "failed",
+              "unresolved",
+              "not_evaluated"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "subject",
+          "result"
+        ],
+        "additionalProperties": true,
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://qiskit-transpile-bench.invalid/schemas/constraint/1"
+      },
+      "minItems": 0
+    },
+    "required_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "seed_block": {
+      "const": "B0"
+    }
+  },
+  "required": [
+    "format",
+    "status",
+    "improved_under_constraints",
+    "profile",
+    "hashes",
+    "constraints",
+    "required_ids",
+    "seed_block"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/decision/1"
+}

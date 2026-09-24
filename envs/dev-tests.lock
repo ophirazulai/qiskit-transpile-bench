@@ -1,0 +1,5 @@
+pytest==8.4.2
+ddt==1.7.2
+hypothesis==6.140.2
+fixtures==4.2.6
+testtools==2.8.0

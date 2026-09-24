@@ -1,0 +1,239 @@
+{
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "qtb-worker/1"
+    },
+    "mode": {
+      "enum": [
+        "roundtrip",
+        "quality",
+        "prefix",
+        "timing_e2e",
+        "timing_reuse",
+        "preset_build",
+        "memory",
+        "diagnostics",
+        "api_checks"
+      ]
+    },
+    "case": {
+      "type": "object",
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "scored",
+            "guard",
+            "deterministic",
+            "zero_baseline",
+            "canary",
+            "timing",
+            "memory"
+          ]
+        },
+        "family": {
+          "type": "string"
+        },
+        "size_band": {
+          "type": "string"
+        },
+        "topology": {
+          "type": "string"
+        },
+        "native_basis": {
+          "type": "string"
+        },
+        "input_group": {
+          "type": "string"
+        },
+        "variant": {
+          "type": "string"
+        },
+        "optimization_level": {
+          "enum": [
+            null,
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "logical_qubits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active_qubits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seeds_per_block": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "circuit": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "file",
+            "sha256"
+          ],
+          "additionalProperties": true
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "file",
+            "sha256"
+          ],
+          "additionalProperties": true
+        },
+        "semantic_reference": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "input"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "frozen_circuit"
+                },
+                "contract": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "kind",
+                "contract",
+                "file",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "input_domain": {
+          "enum": [
+            "all_zero",
+            "all_inputs",
+            "selected_states"
+          ]
+        },
+        "constraint_form": {
+          "enum": [
+            "target",
+            "loose"
+          ]
+        },
+        "options": {
+          "type": "object"
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "case_id",
+        "role",
+        "family",
+        "size_band",
+        "topology",
+        "native_basis",
+        "input_group",
+        "variant",
+        "optimization_level",
+        "logical_qubits",
+        "active_qubits",
+        "seeds_per_block",
+        "circuit",
+        "target",
+        "semantic_reference",
+        "input_domain",
+        "constraint_form",
+        "options",
+        "weight",
+        "timeout_s",
+        "modes"
+      ],
+      "additionalProperties": true
+    },
+    "fixture_root": {
+      "type": "string"
+    },
+    "seeds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "minItems": 1
+    },
+    "build": {
+      "type": "object"
+    },
+    "timeout_s": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    }
+  },
+  "required": [
+    "protocol",
+    "mode",
+    "case",
+    "fixture_root",
+    "seeds",
+    "build",
+    "timeout_s"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/job/1"
+}

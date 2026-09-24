@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "qtb-observation/1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "case_id": {
+      "type": "string"
+    },
+    "revision": {
+      "enum": [
+        "baseline",
+        "evolved"
+      ]
+    },
+    "build_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "case_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "seed_block": {
+      "enum": [
+        "B0",
+        "KB1",
+        "KB2"
+      ]
+    },
+    "mode": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "id",
+    "case_id",
+    "revision",
+    "build_id",
+    "case_hash",
+    "seed",
+    "seed_block",
+    "mode"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qiskit-transpile-bench.invalid/schemas/observation/1"
+}
