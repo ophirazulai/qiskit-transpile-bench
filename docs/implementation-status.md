@@ -35,7 +35,7 @@ not measurements of an evolved Qiskit revision.
 
 ## Implementation validation (2026-09-24)
 
-- All 77 automated tests pass; repository-wide Ruff and whitespace checks pass.
+- All 80 automated tests pass; repository-wide Ruff and whitespace checks pass.
 - A native smoke run built two isolated release wheels from local Qiskit revision
   `c062c2dfd240b23157fbfcf6184e8998a9c8b343` (2.6.0.dev0) and completed all 24 quality
   observations: 12 iteration cases in each build. Smoke does not produce a benchmark verdict.
@@ -46,6 +46,9 @@ not measurements of an evolved Qiskit revision.
   because their compiled outputs contained non-Clifford rotations.
 - The eligible `ripple_adder_10` C1-lite check verified on a 23-qubit union. End-to-end timing,
   reused-pass-manager timing, preset construction, and memory worker modes completed.
+- The zero-initialized `multiplier_h18_n16` positive control verified at level 0, seed 0
+  on Mumbai using a 16-qubit union. An archived single-observation reproducer also
+  recompiled a real 100-qubit Heisenberg case and matched its recorded output hash.
 - The built wheel includes all 271 confirm cases, and its coordinator imports without Qiskit.
 
 Local evidence is under `results/validation/summary.json`, `results/smoke-validation/`,
@@ -83,7 +86,9 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
   Runtime and memory budgets still need measurement on the intended controlled runner.
 - Automatic pruning keeps failing and inconclusive runs intact for investigation. Successful
   large outputs are pruned with a hash/observation retention record; reproducers recompile
-  their recorded seed from the archived wheels.
+  their recorded seed from the archived wheels and fixtures, including after a run archive
+  is moved or a cached quality job's original run is removed. Pinned dependency downloads
+  are required when they are absent from the local package cache.
 - The upstream exclusion command produces proposals, not approved exclusions. The candidate's
   own Python tests are report-only, while the baseline's tests bind the comparison.
 - CI currently verifies the adapter on Qiskit 2.5.2. The trusted verifier stays pinned to that

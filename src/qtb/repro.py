@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
@@ -28,20 +29,24 @@ job["build"]["environment"] = str(env)
 (root / "resolved-job.json").write_text(json.dumps(job))
 scratch = root / "scratch"
 scratch.mkdir(exist_ok=True)
+output = Path(tempfile.mkdtemp(prefix="output-", dir=root))
 # The installed harness owns environment sanitation and provenance validation.
 code = ("import subprocess,sys; from qtb.envbuild import sanitized_environment; "
         "raise SystemExit(subprocess.run(sys.argv[1:],env=sanitized_environment()).returncode)")
 subprocess.run([str(python), "-P", "-c", code, str(python), "-P", "-m", "qtb_worker",
-                "--job", str(root / "resolved-job.json"), "--out", str(root / "output")],
+                "--job", str(root / "resolved-job.json"), "--out", str(output)],
                cwd=scratch, check=True)
-result = json.loads((root / "output/results.jsonl").read_text().splitlines()[0])
+result = json.loads((output / "results.jsonl").read_text().splitlines()[0])
 expected = json.loads((root / "observation.json").read_text())["worker"]
 match = (result["status"] == expected["status"] and
-         result.get("output_hash") == expected.get("output_hash"))
-(root / "reproduction.json").write_text(json.dumps({"match": match,
+         result.get("output_hash") == expected.get("output_hash") and
+         (result["status"] == "ok" or result.get("error") == expected.get("error")))
+(root / "reproduction.json").write_text(json.dumps({"match": match, "output": str(output),
     "expected_status": expected["status"], "actual_status": result["status"],
     "expected_output_hash": expected.get("output_hash"),
-    "actual_output_hash": result.get("output_hash")}, sort_keys=True) + "\\n")
+    "actual_output_hash": result.get("output_hash"),
+    "expected_error": expected.get("error"),
+    "actual_error": result.get("error")}, sort_keys=True) + "\\n")
 print("Observation reproduced" if match else "Observation differs; see reproduction.json")
 raise SystemExit(0 if match else 1)
 '''
@@ -94,6 +99,14 @@ def export_reproducer(observation, run_directory, destination):
         if job_path.is_file()
         else _cached_job(observation, run_directory, run)
     )
+    if observation.get("case_id") and job["case"].get("case_id") != observation["case_id"]:
+        raise HarnessError("Archived worker job does not match the observation case")
+    if observation.get("build_id") and job["build"].get("id") != observation["build_id"]:
+        raise HarnessError("Archived worker job does not match the observation build")
+    if observation.get("mode") and job.get("mode") != observation["mode"]:
+        raise HarnessError("Archived worker job does not match the observation mode")
+    if observation["seed"] not in job["seeds"]:
+        raise HarnessError("Archived worker job does not contain the observation seed")
     job["seeds"] = [observation["seed"]]
     harness_wheels = list((run_directory / "harness-wheel").glob("*.whl"))
     if len(harness_wheels) != 1:

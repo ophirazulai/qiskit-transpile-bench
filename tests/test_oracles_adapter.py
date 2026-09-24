@@ -13,7 +13,7 @@ from qtb.canonical import digest
 from qtb.metrics import d2_n2
 from qtb_verifier.dynamic import verify_dynamic
 from qtb_verifier.layout_semantics import verify_zero
-from qtb_verifier.small_exact import verify_unitary
+from qtb_verifier.small_exact import verify_clifford, verify_unitary
 from qtb_worker.adapter import (
     export_circuit,
     export_layout,
@@ -168,6 +168,32 @@ def test_coherent_control_exposes_global_phase_error():
     b.global_phase = 0.2
     assert verify_unitary(a, b, None)["status"] == "verified"
     assert verify_unitary(a, b, None, controlled=True)["status"] == "mismatch"
+
+
+def test_clifford_oracle_catches_missing_gate_and_refuses_non_clifford_output():
+    reference = QuantumCircuit(3)
+    reference.h(0)
+    reference.cx(0, 1)
+    reference.cz(1, 2)
+    assert verify_clifford(reference, reference.copy(), None)["status"] == "verified"
+    missing_gate = reference.copy()
+    missing_gate.data.pop()
+    assert verify_clifford(reference, missing_gate, None)["status"] == "mismatch"
+    non_clifford = reference.copy()
+    non_clifford.rz(0.001, 0)
+    assert verify_clifford(reference, non_clifford, None)["status"] == "unverified"
+
+
+def test_metrics_and_exact_oracle_ignore_qiskit_self_grading(monkeypatch):
+    reference = QuantumCircuit(2)
+    reference.h(0)
+    reference.cz(0, 1)
+    wrong = QuantumCircuit(2)
+    wrong.h(0)
+    monkeypatch.setattr(QuantumCircuit, "depth", lambda self, *args, **kwargs: 0)
+    monkeypatch.setattr(Operator, "equiv", lambda self, other, *args, **kwargs: True)
+    assert d2_n2(export_circuit(reference)["operations"], ["cz"]) == (1, 1)
+    assert verify_unitary(reference, wrong, None)["status"] == "mismatch"
 
 
 def test_angle_bound_target_roundtrip_and_legality():
