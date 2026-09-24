@@ -10,7 +10,7 @@ def test_t1_t2_metadata_matches_frozen_fixture_provenance():
     source = "test/benchmarks/transpiler_benchmarks.py"
     for profile in ("iterations-profile", "confirm-profile"):
         manifest, policy, _ = load_profile(profile)
-        assert manifest["version"] == policy["version"] == 2
+        assert manifest["version"] == policy["version"] == 3
         for case_id, name in (("T1", "single_h"), ("T2", "cancel_2q")):
             case = next(case for case in manifest["cases"] if case["case_id"] == case_id)
             fixture = provenance[name]

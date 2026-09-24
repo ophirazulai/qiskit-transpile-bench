@@ -48,9 +48,35 @@ def save_output(output, input_width, path, opaque=False):
     return {"output": str(path), "output_hash": hash_, "layout": export_layout(output, input_width)}
 
 
+TIMING_MODES = {"timing_e2e", "timing_reuse", "preset_build"}
+
+
+def run_batch_entry(job, index, outdir):
+    """One entry of a `timing_batch` job: its own inputs, mode and fixed seed.
+
+    The job's seed list indexes the batch, so the coordinator's per-seed
+    heartbeat, timeout and retry rules apply to each timed case.
+    """
+    entry = job["batch"][index]
+    if entry["mode"] not in TIMING_MODES:
+        raise HarnessError(f"Unsupported timing batch mode: {entry['mode']}")
+    inputs = load_inputs({"case": entry["case"], "fixture_root": job["fixture_root"]})
+    single = dict(job, mode=entry["mode"], case=entry["case"])
+    single.pop("batch")
+    result = run_seed(single, entry["seed"], outdir, inputs)
+    return dict(
+        result,
+        case_id=entry["case"]["case_id"],
+        timing_mode=entry["mode"],
+        timing_seed=entry["seed"],
+    )
+
+
 def run_seed(job, seed, outdir, inputs):
     from qiskit import transpile
 
+    if job["mode"] == "timing_batch":
+        return run_batch_entry(job, seed, outdir)
     circuit, target, target_data = inputs
     case, mode = job["case"], job["mode"]
     outdir = Path(outdir)

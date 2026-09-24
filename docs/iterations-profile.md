@@ -70,25 +70,45 @@ reference is broken (`INCONCLUSIVE`). If only the evolved revision misses, in ei
 the canary is `unresolved`, which also gives `INCONCLUSIVE`: the change is unexplained and
 needs human review.
 
-### Timing panel (T1–T19) and the preset panel
+### Timing panels
 
-| IDs | Input | Constraints | Level | Mode |
-| --- | --- | --- | --- | --- |
-| T1, T2 | `single_h` (one `h`), `cancel_2q` (six gates that cancel) | Loose 27-qubit coupling map + basis list | Revision default | `timing_e2e` |
-| T3–T6 | `qv_n14_d14` (98 random 2-qubit unitaries) | `melbourne_14` target | 0, 1, 2, 3 | `timing_e2e` |
-| T7–T10 | `long_2q_sequence` | Loose Rochester map, legacy `u1,u2,u3,cx,id` basis | 0, 1, 2, 3 | `timing_e2e` |
-| T11–T19 | The three scored circuits × `cz`, `cx`, `ecr` | Heavy-hex targets | 2 | `timing_reuse` |
-| preset/cx, cz, ecr | — | Heavy-hex targets | 2 | `preset_build` |
+| IDs | Panel | Input | Constraints | Level | Mode |
+| --- | --- | --- | --- | --- | --- |
+| T1, T2 | `timing` | `single_h` (one `h`), `cancel_2q` (six gates that cancel) | Loose 27-qubit coupling map + basis list | Revision default | `timing_e2e` |
+| T3–T6 | `timing` | `qv_n14_d14` (98 random 2-qubit unitaries) | `melbourne_14` target | 0, 1, 2, 3 | `timing_e2e` |
+| T7–T10 | `timing` | `long_2q_sequence` | Loose Rochester map, legacy `u1,u2,u3,cx,id` basis | 0, 1, 2, 3 | `timing_e2e` |
+| T11, T14, T17 | `timing` | The three scored circuits on `cz` | Heavy-hex target | 2 | `timing_reuse` |
+| T12, T13, T15, T16, T18, T19 | `timing-basis` | The three scored circuits on `cx` and `ecr` | Heavy-hex targets | 2 | `timing_reuse` |
+| preset/cx, cz, ecr | `preset` | — | Heavy-hex targets | 2 | `preset_build` |
 
 `timing_e2e` times a whole `transpile()` call, including option handling and target
 construction. `timing_reuse` builds the pass manager first, then times only `pm.run()`. T1–T2
 expose fixed per-call overhead that large circuits hide. T3–T10 cover every optimization level.
-T11–T19 time the scored workload itself. The preset panel is always measured, but it is guarded
-only when the change could affect preset assembly or target handling.
+T11, T14 and T17 time the scored workload itself.
 
-When the change scope includes layout or routing (or is unknown), a **multi-seed companion
-panel** is added: the nine T11–T19 cases over seeds 0–19. It exists because one fixed seed
+Which panels are measured follows the change scope ([metrics.md](metrics.md#7-change-scope-and-stage-coverage)):
+
+| Panel | Measured | Guarded |
+| --- | --- | --- |
+| `timing` | Always | Always |
+| `timing-basis` | When the change can reach translation or optimization, or the scope is unknown | Whenever measured |
+| `preset` | Always | When the change could affect preset assembly or target handling, or the scope is unknown |
+| `companion` | When the change can reach layout or routing, or the scope is unknown | Whenever measured |
+
+The `cx`/`ecr` twins repeat the `cz` cases' layout and routing on the same coupling map; only
+the basis translation and the two-qubit resynthesis differ. A layout or routing change is
+therefore timed on the `cz` cases and, through the **multi-seed companion panel**, on the three
+`cz` cases over seeds 0–19 (three rounds per seed). The companion exists because one fixed seed
 times only one search path.
+
+**How a panel is measured.** Every round is one fresh process per arm (baseline, control,
+evolved) that loads, warms up and times each case of the panel in manifest order, with the
+arms in random order. A case's time in a round is the median of its timed calls (at least 2
+calls and 1 s); the case time is the median over rounds. The panel starts with a 4-round
+**screen**: if the control arm is clean and the candidate already sits inside the noise band
+of the full 6-round measurement with no per-case breach, the panel stops. Otherwise it is
+measured in full in a fresh session, and a candidate-only breach triggers one fresh 12-round
+rerun that decides. The report names the regime each panel ended in.
 
 ## Acceptance rules (IA1–IA6)
 
@@ -100,7 +120,7 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
-| IA5 cost | `IA5/timing`, `IA5/preset`, `IA5/companion` | Panel log time ratio within calibrated A/A noise, no per-case breach (> 10% and above the noise floor), and the control arm is clean |
+| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel log time ratio within calibrated A/A noise, no per-case breach (> 10% and above the noise floor), and the control arm is clean |
 | IA6 completeness | `IA6/completeness` | All 2 × (9 × 100 + 3 × 10) observations are present. Determinism audit passed |
 
 Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight`,
@@ -108,7 +128,8 @@ Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight
 
 Policy values (`policy.json`): improvement multiplier 2.0, guard multiplier 3.0, practical
 ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924,
-upstream test budgets of 4 h (Python) and 3 h (Rust).
+upstream test budgets of 4 h (Python) and 3 h (Rust). Timing: 4 screen rounds, 6 full rounds,
+rerun multiplier 2, 30 calibration rounds, 1 warm-up, at least 2 timed calls and 1 s per round.
 
 ## Statistical power
 
@@ -126,11 +147,13 @@ this loop never sees.
 ## Budget
 
 On the development machine (serial, Apple M1 Max): about 10 CPU-minutes of quality compiles
-per revision, roughly doubled by routing replay. The timing panel takes about 1 hour on an
-exclusive machine, and the companion about as much again when required. The first run
-against a baseline also pays for calibration (three seed blocks of baseline quality, a
-300-seed role audit, and A/A timing of two baseline builds). Later runs reuse it for 30 days.
-Building the Qiskit environments dominates the first run; see
+per revision, roughly doubled by routing replay. The cost panels take about 10–15 minutes on
+an exclusive machine when the screen is clear (16 cases × 4 rounds × 3 arms, in 12 processes),
+up to about 40 minutes with the full count and a rerun, plus about 20 minutes for the
+companion when required. These are design estimates, not measured runs. The first run against
+a baseline also pays for calibration (three seed blocks of baseline quality, a 300-seed role
+audit, and 30 A/A rounds of every cost panel from two baseline builds, about an hour). Later
+runs reuse it for 30 days. Building the Qiskit environments dominates the first run; see
 [environments.md](environments.md#how-long-it-takes).
 
 ## Declared coverage gaps

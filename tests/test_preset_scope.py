@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from qtb.canonical import digest, write_json
+from qtb.config import STAGES
 from qtb.coordinator.calibration import measure_costs, preflight, required_cost_panels
 from qtb.coordinator.costs import replay_costs
 from qtb.errors import Incomplete
@@ -15,6 +16,43 @@ def comparison(scope, paths=()):
     ]
     run = {"profile": "iterations-profile", "scope": {"2": scope}, "changed_paths": paths}
     return SimpleNamespace(run=run, manifest={"cases": cases})
+
+
+def scoped(stages, unmapped=(), profile="iterations-profile"):
+    cases = [
+        {"case_id": "T1", "panel": "timing", "modes": ["timing_e2e"]},
+        {"case_id": "T11", "panel": "timing", "modes": ["timing_reuse"]},
+        {"case_id": "T12", "panel": "timing-basis", "modes": ["timing_reuse"]},
+        {"case_id": "preset/cz", "panel": "preset", "modes": ["preset_build"]},
+    ]
+    run = {"profile": profile, "scope": {"2": {"stages": stages, "unmapped_paths": list(unmapped)}}}
+    return SimpleNamespace(run=run, manifest={"cases": cases})
+
+
+def test_basis_twins_and_companion_follow_the_change_scope():
+    from qtb.coordinator.calibration import cost_panels
+
+    def names(comparison, **kwargs):
+        panels = cost_panels(comparison, **kwargs)
+        return {name: [c["case_id"] for c in cases] for name, (cases, _) in panels.items()}
+
+    routing = names(scoped(["layout", "routing"]))
+    assert "timing-basis" not in routing
+    assert routing["timing"] == ["T1", "T11"] and routing["companion"] == ["T11"]
+    translation = names(scoped(["translation"]))
+    assert translation["timing-basis"] == ["T12"] and "companion" not in translation
+    assert "timing-basis" in names(scoped(["optimization"]))
+    scheduling = names(scoped(["scheduling"]))
+    assert set(scheduling) == {"timing", "preset"}
+    unknown = names(scoped(["scheduling"], unmapped=["mystery.py"]))
+    assert {"timing-basis", "companion", "preset"} <= set(unknown)
+    everything = names(scoped(list(STAGES)))
+    assert {"timing-basis", "companion"} <= set(everything)
+    assert set(names(scoped(["scheduling"]), all_panels=True)) == set(everything)
+    # Whatever is measured under a relevant scope is guarded.
+    assert "timing-basis" in required_cost_panels(scoped(["translation"]))
+    assert "companion" in required_cost_panels(scoped(["routing"]))
+    assert "preset" not in required_cost_panels(scoped(["translation"]))
 
 
 def test_preset_is_measured_but_required_only_for_relevant_scope():

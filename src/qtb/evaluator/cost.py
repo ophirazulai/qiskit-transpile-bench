@@ -9,7 +9,42 @@ from qtb.canonical import digest
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator.statistics import quantile
 
-COUNTS = {"timing": (10, 20, 30), "companion": (3, 6, 30), "memory": (5, 10, 10)}
+# Fallback (screen, normal, rerun, collected) counts when a policy names none.
+COUNTS = {"timing": (0, 10, 20, 30), "companion": (0, 3, 6, 30), "memory": (0, 5, 10, 10)}
+
+
+def regime_counts(estimator, protocol=None):
+    """Per-regime sample counts for one estimator, from the measurement protocol.
+
+    A ``screen`` count of zero (or a missing key) disables the short early-stop
+    regime. ``normal`` is the full measurement; ``rerun`` is the fresh doubled
+    measurement after a candidate-only breach; ``collected`` is the A/A
+    calibration sample that every threshold is bootstrapped from.
+    """
+    if estimator not in COUNTS:
+        raise HarnessError(f"Unknown cost estimator: {estimator}")
+    screen, normal, rerun, collected = COUNTS[estimator]
+    protocol = protocol or {}
+    multiplier = protocol.get("rerun_multiplier", 2)
+    if estimator == "timing":
+        normal = protocol.get("timing_rounds", normal)
+        screen = protocol.get("screen_rounds", screen)
+        collected = protocol.get("calibration_rounds", collected)
+    elif estimator == "companion":
+        normal = protocol.get("companion_rounds", normal)
+        collected = protocol.get("calibration_rounds", collected)
+    else:
+        normal = protocol.get("memory_processes", normal)
+        collected = protocol.get("calibration_memory_processes", collected)
+    rerun = normal * multiplier
+    if not 0 <= screen < normal < rerun or collected < rerun:
+        raise HarnessError(
+            f"Invalid {estimator} regime counts: {(screen, normal, rerun, collected)}"
+        )
+    regimes = {"normal": normal, "rerun": rerun}
+    if screen:
+        regimes = {"screen": screen, **regimes}
+    return regimes, collected
 
 
 def cost_estimate(samples, estimator):
@@ -39,16 +74,25 @@ def _resample(samples, estimator, indices):
 
 
 def calibrate_cost(
-    arms, estimator, weights, machine, created_at, rng_seed=20260924, replicates=1000
+    arms,
+    estimator,
+    weights,
+    machine,
+    created_at,
+    rng_seed=20260924,
+    replicates=1000,
+    protocol=None,
 ):
     """arms = {baseline/control: {case: raw rounds/processes}}.
 
     Round indices are shared across cases and companion seeds to preserve session
-    blocks. Inner timed calls stay intact. All draws are with replacement.
+    blocks. Inner timed calls stay intact. All draws are with replacement. Every
+    regime the protocol names (screen, normal, rerun) gets its own noise band and
+    per-case floors at that regime's sample count.
     """
     if set(arms) != {"baseline", "control"} or not weights:
         raise HarnessError("A/A calibration needs two independent baseline arms")
-    normal, rerun, collected = COUNTS[estimator]
+    counts, collected = regime_counts(estimator, protocol)
     if not math.isclose(sum(weights.values()), 1.0):
         raise HarnessError("Cost weights must sum to one")
     for cases in arms.values():
@@ -61,7 +105,7 @@ def calibrate_cost(
             cost_estimate(samples, estimator)
     regimes = {}
     rng = random.Random(rng_seed)
-    for regime, count in (("normal", normal), ("rerun", rerun)):
+    for regime, count in counts.items():
         panels, absolute = [], {c: [] for c in weights}
         for _ in range(replicates):
             draws = {arm: rng.choices(range(collected), k=count) for arm in arms}
@@ -84,6 +128,7 @@ def calibrate_cost(
         "estimator": estimator,
         "weights": weights,
         "regimes": regimes,
+        "collected": collected,
         "machine": machine,
         "created_at": created_at,
         "rng_seed": rng_seed,
@@ -99,20 +144,51 @@ def calibrate_cost(
     return result
 
 
+def threshold_for(calibration, regime):
+    """The screen is judged against the full measurement's noise band.
+
+    The short regime's own band is wider, so an estimate that already sits inside
+    the full band is one a full run would also accept with high probability. Per
+    case floors stay the short regime's own, since they bound absolute noise at
+    that sample count.
+    """
+    threshold = calibration["regimes"][regime]
+    if regime == "screen":
+        threshold = dict(threshold, noise_panel=calibration["regimes"]["normal"]["noise_panel"])
+    return threshold
+
+
+def _breached(estimate, baseline, weights, threshold):
+    ratios = {c: estimate[c] / baseline[c] for c in weights}
+    ln_panel = sum(w * math.log(ratios[c]) for c, w in weights.items())
+    caps = [
+        c
+        for c, ratio in ratios.items()
+        if ratio > 1.1 and estimate[c] - baseline[c] > threshold["floors"][c]
+    ]
+    return {
+        "ln_panel": ln_panel,
+        "ratios": ratios,
+        "cap_breaches": caps,
+        "breached": bool(caps) or ln_panel > threshold["noise_panel"],
+    }
+
+
 def null_cost_rejections(arms, calibration, replicates=1000, rng_seed=20260925):
-    """Bootstrap the complete three-arm rule, including its one fresh rerun.
+    """Bootstrap the complete three-arm rule: screen, full measurement, fresh rerun.
 
     Cases share round draws within each arm. The two independently built
     baseline series form the null distribution; the candidate is another
     independent draw from the control series. Repeated trials retain all
-    within-round calls and all companion seeds.
+    within-round calls and all companion seeds. Each regime is a fresh draw,
+    as each is a fresh session on the runner.
     """
     estimator, weights = calibration["estimator"], calibration["weights"]
-    collected = COUNTS[estimator][2]
+    collected = calibration.get("collected", COUNTS[estimator][3])
     rng = random.Random(rng_seed)
 
     def trial(regime):
-        threshold = calibration["regimes"][regime]
+        threshold = threshold_for(calibration, regime)
         estimates = {}
         for arm in ("baseline", "control", "evolved"):
             indices = rng.choices(range(collected), k=threshold["count"])
@@ -121,20 +197,18 @@ def null_cost_rejections(arms, calibration, replicates=1000, rng_seed=20260925):
                 case: cost_estimate(_resample(source[case], estimator, indices), estimator)
                 for case in weights
             }
-
-        def breached(arm):
-            ratios = {c: estimates[arm][c] / estimates["baseline"][c] for c in weights}
-            panel = sum(w * math.log(ratios[c]) for c, w in weights.items())
-            return panel > threshold["noise_panel"] or any(
-                ratios[c] > 1.1
-                and estimates[arm][c] - estimates["baseline"][c] > threshold["floors"][c]
-                for c in weights
-            )
-
-        return breached("control"), breached("evolved")
+        return tuple(
+            _breached(estimates[arm], estimates["baseline"], weights, threshold)["breached"]
+            for arm in ("control", "evolved")
+        )
 
     rejected = []
     for _ in range(replicates):
+        if "screen" in calibration["regimes"]:
+            control, candidate = trial("screen")
+            if not control and not candidate:
+                rejected.append(False)
+                continue
         control, candidate = trial("normal")
         failure = False
         if candidate and not control:
@@ -168,6 +242,8 @@ def validate_bundle(bundle, calibration, run_id=None, historical=False):
         raise Incomplete("Calibration was stale at measurement time")
     if not historical and datetime.now(created.tzinfo) > created + timedelta(days=30):
         raise Incomplete("Calibration has expired")
+    if bundle["regime"] not in calibration["regimes"]:
+        raise Incomplete(f"Cost regime {bundle['regime']} was not calibrated")
     count = calibration["regimes"][bundle["regime"]]["count"]
     for arm in arms.values():
         if set(arm["samples"]) != set(calibration["weights"]):
@@ -179,8 +255,18 @@ def validate_bundle(bundle, calibration, run_id=None, historical=False):
 
 
 def cost_guard(bundle, calibration, run_id=None, historical=True):
+    """Judge one bundle at its regime.
+
+    ``screen``: ``passed`` when the control is clean and the candidate sits inside
+    the full-count noise band with no cap breach; otherwise ``unresolved`` with
+    ``needs_full`` set, and the panel is measured again at full count in a fresh
+    session. ``normal``: a candidate-only breach sets ``needs_rerun``. ``rerun``:
+    decides ``failed`` or ``passed_on_rerun`` unless the control also breached.
+    """
     validate_bundle(bundle, calibration, run_id, historical)
-    threshold = calibration["regimes"][bundle["regime"]]
+    regime = bundle["regime"]
+    threshold = threshold_for(calibration, regime)
+    weights = calibration["weights"]
     estimates = {
         arm: {
             case: cost_estimate(samples, calibration["estimator"])
@@ -188,31 +274,19 @@ def cost_guard(bundle, calibration, run_id=None, historical=True):
         }
         for arm, row in bundle["arms"].items()
     }
-
-    def compare(arm):
-        ratios = {c: estimates[arm][c] / estimates["baseline"][c] for c in calibration["weights"]}
-        ln_panel = sum(w * math.log(ratios[c]) for c, w in calibration["weights"].items())
-        caps = [
-            c
-            for c, ratio in ratios.items()
-            if ratio > 1.1 and estimates[arm][c] - estimates["baseline"][c] > threshold["floors"][c]
-        ]
-        return {
-            "ln_panel": ln_panel,
-            "ratios": ratios,
-            "cap_breaches": caps,
-            "breached": bool(caps) or ln_panel > threshold["noise_panel"],
-        }
-
-    control, candidate = compare("control"), compare("evolved")
+    control, candidate = (
+        _breached(estimates[arm], estimates["baseline"], weights, threshold)
+        for arm in ("control", "evolved")
+    )
     result = "unresolved" if control["breached"] or candidate["breached"] else "passed"
-    if bundle["regime"] == "rerun" and not control["breached"]:
+    if regime == "rerun" and not control["breached"]:
         result = "failed" if candidate["breached"] else "passed_on_rerun"
     return {
         "result": result,
+        "regime": regime,
+        "count": threshold["count"],
         "control": control,
         "candidate": candidate,
-        "needs_rerun": candidate["breached"]
-        and not control["breached"]
-        and bundle["regime"] == "normal",
+        "needs_full": regime == "screen" and result != "passed",
+        "needs_rerun": candidate["breached"] and not control["breached"] and regime == "normal",
     }

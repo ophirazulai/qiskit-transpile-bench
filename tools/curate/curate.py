@@ -100,7 +100,7 @@ def policy(profile):
     return dict(
         format="qtb-policy/1",
         profile=profile,
-        version=2,
+        version=3,
         required_ids=required,
         quality_prerequisites=["harness/roundtrip", "audit/determinism"],
         practical_ratio=0.99 if prefix == "CA" else 1.0,
@@ -113,9 +113,12 @@ def policy(profile):
         measurement_protocol=dict(
             seed_blocks={"B0": [0, 100], "KB1": [100, 200], "KB2": [200, 300]},
             quality_batch_size=25,
-            timing_rounds=10,
+            # Timing: a 4-round screen ends a clearly clean panel early; the full
+            # count is 6 rounds in the iterations loop and 10 in confirm.
+            screen_rounds=4,
+            timing_rounds=10 if prefix == "CA" else 6,
             warmups=1,
-            minimum_calls=3,
+            minimum_calls=2,
             minimum_ns=1000000000,
             companion_seeds=list(range(20)),
             companion_rounds=3,
@@ -395,7 +398,10 @@ def curate(source, root=ROOT):
         for level in range(4):
             timing.append(timed(dict(template, optimization_level=level), f"T{len(timing) + 1}", 0))
     for case in iteration[:9]:
-        timing.append(timed(case, f"T{len(timing) + 1}", 1234567845, "timing_reuse"))
+        # The cx/ecr twins share the cz case's layout and routing; they are timed
+        # only when the change can reach translation or optimization.
+        panel = "timing" if case["native_basis"] == "cz" else "timing-basis"
+        timing.append(timed(case, f"T{len(timing) + 1}", 1234567845, "timing_reuse", panel))
     for basis in ("cx", "cz", "ecr"):
         case = next(c for c in iteration if c["native_basis"] == basis)
         timing.append(timed(case, "preset/" + basis, 0, "preset_build", "preset"))
@@ -412,11 +418,17 @@ def curate(source, root=ROOT):
                 "queko_bss_53",
                 "su2_circular_n89",
             ]
+            # Level 1 sits between levels 0 and 2 (T4 and T8 still time it), and
+            # the three iterations circuits are already timed at level 2 by T11,
+            # T14 and T17.
             for name in heavy:
                 template = next(
                     c for c in cases if c["input_group"] == name and c["role"] == "scored"
                 )
-                for level in range(3 if name == "su2_circular_n89" else 4):
+                levels = [0, 2] if name == "su2_circular_n89" else [0, 2, 3]
+                if name in ITERATIONS:
+                    levels.remove(2)
+                for level in levels:
                     cases.append(
                         timed(
                             dict(template, optimization_level=level),
@@ -446,7 +458,7 @@ def curate(source, root=ROOT):
         manifest = dict(
             format="qtb-manifest/1",
             profile=profile,
-            version=2,
+            version=3,
             cases=cases,
             status="unqualified",
             coverage_gaps=[

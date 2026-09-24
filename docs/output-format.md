@@ -49,7 +49,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `changed-tests.json` | `compare` | Test files and Rust sources that the evolved tree changed |
 | `upstream-baseline/`, `upstream-evolved/` | `compare` | Upstream pytest records (`tests.jsonl`), logs and `rust.log` |
 | `upstream-evolved-own.json` | `compare` | Report-only run of the candidate's own Python tests |
-| `cost/<panel>/normal.json`, `rerun.json` | `compare` | Raw three-arm timing or memory bundles; sessions in subdirectories |
+| `cost/<panel>/screen.json`, `normal.json`, `rerun.json` | `compare` | Raw three-arm timing or memory bundles, one per regime reached; sessions in subdirectories. A timing session holds one `timing_batch` job per round and arm |
 | `builds/` | Coordinator | Snapshots, build directories, `build.json`, `build.log` ([environments.md](environments.md)) |
 | `verifier/` | Coordinator | Verifier environment |
 | `harness-wheel/`, `harness-build.log` | Coordinator | The harness wheel installed everywhere |

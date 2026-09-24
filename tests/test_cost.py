@@ -3,7 +3,41 @@ from datetime import UTC, datetime
 import pytest
 
 from qtb.errors import HarnessError, Incomplete
-from qtb.evaluator.cost import calibrate_cost, cost_estimate, cost_guard, validate_bundle
+from qtb.evaluator.cost import (
+    calibrate_cost,
+    cost_estimate,
+    cost_guard,
+    regime_counts,
+    validate_bundle,
+)
+
+SCREENED = {
+    "screen_rounds": 2,
+    "timing_rounds": 4,
+    "rerun_multiplier": 2,
+    "calibration_rounds": 8,
+    "warmups": 1,
+    "minimum_calls": 2,
+    "minimum_ns": 1_000_000_000,
+}
+
+
+def test_regime_counts_follow_the_policy_and_reject_nonsense():
+    assert regime_counts("timing") == ({"normal": 10, "rerun": 20}, 30)
+    assert regime_counts("timing", SCREENED) == ({"screen": 2, "normal": 4, "rerun": 8}, 8)
+    assert regime_counts("timing", dict(SCREENED, screen_rounds=0)) == (
+        {"normal": 4, "rerun": 8},
+        8,
+    )
+    assert regime_counts("companion", {"companion_rounds": 3, "calibration_rounds": 30}) == (
+        {"normal": 3, "rerun": 6},
+        30,
+    )
+    assert regime_counts("memory", {"memory_processes": 5}) == ({"normal": 5, "rerun": 10}, 10)
+    with pytest.raises(HarnessError):
+        regime_counts("timing", dict(SCREENED, screen_rounds=4))
+    with pytest.raises(HarnessError):
+        regime_counts("timing", dict(SCREENED, calibration_rounds=6))
 
 
 def test_distinct_estimators():
@@ -95,6 +129,171 @@ def test_cost_null_calibration_applies_confirmed_rerun_rule():
     )
     assert result["false_rejection_rate"] == 0
     assert result["null_rejections"] == [False] * 100
+
+
+def screened_bundle(calibration, ratio, regime, session="session"):
+    count = calibration["regimes"][regime]["count"]
+    return dict(
+        complete=True,
+        run_id="run",
+        session_id=session,
+        regime=regime,
+        machine=calibration["machine"],
+        calibration_id=calibration["id"],
+        measured_at=calibration["created_at"],
+        arms={
+            arm: dict(
+                arm_id=f"{session}-{arm}",
+                session_id=session,
+                build_id="identical",
+                samples={"c": [[80 * value]] * count},
+            )
+            for arm, value in [("baseline", 1), ("control", 1), ("evolved", ratio)]
+        },
+    )
+
+
+def test_screen_regime_is_calibrated_and_judged_against_the_full_band():
+    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "control")}
+    calibration = calibrate_cost(
+        arms, "timing", {"c": 1}, {"cpu": "test"}, datetime.now(UTC).isoformat(),
+        replicates=20, protocol=SCREENED,
+    )
+    assert [r["count"] for r in calibration["regimes"].values()] == [2, 4, 8]
+    assert calibration["collected"] == 8
+    clean = cost_guard(screened_bundle(calibration, 1.0, "screen"), calibration)
+    assert (clean["result"], clean["regime"], clean["count"]) == ("passed", "screen", 2)
+    assert not clean["needs_full"] and not clean["needs_rerun"]
+    slow = cost_guard(screened_bundle(calibration, 1.15, "screen"), calibration)
+    assert slow["result"] == "unresolved" and slow["needs_full"] and not slow["needs_rerun"]
+    # A regime the calibration never bootstrapped cannot be judged.
+    with pytest.raises(Incomplete):
+        cost_guard(
+            dict(screened_bundle(calibration, 1.0, "screen"), regime="normal"), calibration
+        )
+    unscreened = calibrate_cost(
+        arms, "timing", {"c": 1}, {"cpu": "test"}, calibration["created_at"],
+        replicates=20, protocol=dict(SCREENED, screen_rounds=0),
+    )
+    assert list(unscreened["regimes"]) == ["normal", "rerun"]
+    stray = dict(screened_bundle(calibration, 1.0, "screen"), calibration_id=unscreened["id"])
+    with pytest.raises(Incomplete):
+        cost_guard(stray, unscreened)
+
+
+def measured_panel(monkeypatch, tmp_path, ratio):
+    from qtb.coordinator import costs
+
+    calls = []
+
+    def worker(build, job, directory):
+        calls.append((build["id"], job["mode"], directory))
+        scale = ratio if build["id"] == "evolved" else 1.0
+        return [
+            {"seed": seed, "status": "ok", "samples_ns": [int(80 * scale)]}
+            for seed in job["seeds"]
+        ]
+
+    monkeypatch.setattr(costs, "run_worker", worker)
+    monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
+    case = {"case_id": "c", "panel": "timing", "timeout_s": 120, "modes": ["timing_e2e"]}
+    builds = {arm: {"id": arm} for arm in ("baseline", "control", "evolved")}
+    arms = {a: {"c": [[80]] * 8} for a in ("baseline", "control")}
+    calibration = calibrate_cost(
+        arms, "timing", {"c": 1}, {}, datetime.now(UTC).isoformat(),
+        replicates=20, protocol=SCREENED,
+    )
+    run = {"run_id": "run", "machine": {}}
+    result = costs.measure_panel(
+        run, builds, [case], "timing", tmp_path / "cost/timing", tmp_path, calibration,
+        SCREENED,
+    )
+    return result, calls, case, calibration, builds
+
+
+def test_clear_screen_ends_the_panel_early(monkeypatch, tmp_path):
+    from qtb.canonical import read_json
+
+    result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.0)
+    assert (result["result"], result["regime"], result["count"]) == ("passed", "screen", 2)
+    assert len(calls) == 2 * 3  # screen rounds × arms, nothing more
+    assert (tmp_path / "cost/timing/screen.json").exists()
+    assert not (tmp_path / "cost/timing/normal.json").exists()
+    assert read_json(tmp_path / "cost/timing/screen.json")["regime"] == "screen"
+
+
+def test_unclear_screen_measures_in_full_then_reruns_fresh(monkeypatch, tmp_path):
+    from qtb.canonical import read_json
+
+    result, calls, *_ = measured_panel(monkeypatch, tmp_path, 1.15)
+    assert (result["result"], result["regime"], result["count"]) == ("failed", "rerun", 8)
+    assert len(calls) == (2 + 4 + 8) * 3
+    regimes = ("screen", "normal", "rerun")
+    bundles = {r: read_json(tmp_path / f"cost/timing/{r}.json") for r in regimes}
+    assert len({b["session_id"] for b in bundles.values()}) == 3
+    assert [len(b["arms"]["evolved"]["samples"]["c"]) for b in bundles.values()] == [2, 4, 8]
+
+
+def test_replay_accepts_a_clear_screen_and_demands_the_rest_otherwise(monkeypatch, tmp_path):
+    from qtb.coordinator.costs import replay_costs
+
+    for ratio, expected in ((1.0, "passed"), (1.15, "failed")):
+        directory = tmp_path / f"ratio-{ratio}"
+        _, _, case, calibration, builds = measured_panel(monkeypatch, directory, ratio)
+        run = dict(
+            profile="iterations-profile", run_id="run", scope={},
+            calibrations={"cost": {"timing": calibration}}, builds=builds,
+        )
+        replayed = replay_costs(directory, run, {"cases": [case]}, [])
+        assert replayed[0]["result"] == expected
+        assert replayed[0]["regime"] == ("screen" if ratio == 1.0 else "rerun")
+        if ratio == 1.15:
+            (directory / "cost/timing/rerun.json").unlink()
+            replayed = replay_costs(directory, run, {"cases": [case]}, [])
+            assert replayed[0]["result"] == "unresolved"
+            (directory / "cost/timing/normal.json").unlink()
+            replayed = replay_costs(directory, run, {"cases": [case]}, [])
+            assert "Missing normal" in replayed[0]["detail"]
+
+
+def test_timing_panel_is_one_process_per_round_and_arm(monkeypatch, tmp_path):
+    from qtb.coordinator import costs
+
+    calls = []
+
+    def worker(build, job, directory):
+        calls.append((build["id"], job, directory))
+        return [
+            {"seed": index, "status": "ok", "samples_ns": [index + 10 * int(build["id"])]}
+            for index in job["seeds"]
+        ]
+
+    monkeypatch.setattr(costs, "run_worker", worker)
+    monkeypatch.setattr(costs.os, "getloadavg", lambda: (0, 0, 0))
+    cases = [
+        {"case_id": "T1", "timeout_s": 120, "modes": ["timing_e2e"], "timing": {"fixed_seed": 7}},
+        {"case_id": "T11", "timeout_s": 300, "modes": ["timing_reuse"], "timing": {"fixed_seed": 3}},  # noqa: E501
+        {"case_id": "preset/cz", "timeout_s": 120, "modes": ["preset_build"]},
+    ]
+    builds = {arm: {"id": str(i)} for i, arm in enumerate(("baseline", "control", "evolved"))}
+    result = costs.collect_panel(
+        {"run_id": "r", "machine": {}}, builds, cases, "timing", tmp_path, 3, list(builds),
+        tmp_path, SCREENED,
+    )
+    assert len(calls) == 3 * 3  # rounds × arms, not rounds × arms × cases
+    assert len({directory for _, _, directory in calls}) == 9
+    for _, job, _ in calls:
+        assert job["mode"] == "timing_batch" and "case" not in job
+        assert job["seeds"] == [0, 1, 2] and job["timeout_s"] == 1500
+        assert [(e["case"]["case_id"], e["mode"], e["seed"]) for e in job["batch"]] == [
+            ("T1", "timing_e2e", 7), ("T11", "timing_reuse", 3), ("preset/cz", "preset_build", 0),
+        ]
+        assert (job["warmups"], job["minimum_calls"], job["minimum_ns"]) == (1, 2, 10**9)
+    for arm, build in builds.items():
+        samples = result["arms"][arm]["samples"]
+        assert samples == {
+            c["case_id"]: [[index + 10 * int(build["id"])]] * 3 for index, c in enumerate(cases)
+        }
 
 
 def test_companion_batches_seeds_per_arm_round_without_changing_samples(monkeypatch, tmp_path):

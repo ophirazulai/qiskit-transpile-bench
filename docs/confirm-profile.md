@@ -25,7 +25,7 @@ workload drawn from Qiskit's in-tree benchmark suite (`test/benchmarks/`), withi
 count, compile time, memory and correctness limits. It says nothing about circuits outside
 this workload.
 
-## Workload: 271 cases
+## Workload: 260 cases
 
 | Role | Count | Purpose |
 | --- | ---: | --- |
@@ -34,7 +34,7 @@ this workload.
 | Deterministic | 48 | Seed-blind cases compared exactly, seed by seed; any increase fails |
 | Zero-baseline | 4 | Cases whose baseline `D2` = `N2` = 0; any non-zero value fails |
 | Canary | 5 | Constant cases that must equal a frozen value |
-| Timing | 53 | T1–T19 and the preset panel from the iterations profile, plus a 31-case confirm timing panel |
+| Timing | 42 | T1–T19 and the preset panel from the iterations profile, plus a 20-case confirm timing panel |
 | Memory | 9 | Peak RSS of one compile in a fresh process |
 
 Quality work per revision is about 15,000 compiles.
@@ -101,7 +101,7 @@ iterations profile's three circuits together carry 18.2%.
 | --- | --- | --- |
 | `timing` | T1–T19, unchanged from the iterations profile | `timing_e2e` / `timing_reuse` |
 | `preset` | Preset construction on the three heavy-hex targets | `preset_build` |
-| `confirm-timing` | 31 cases: the heaviest scored input of each family (`qft_n100`, `square_heisenberg_n100`, `qaoa_ba_n100_3reps`, `qv_n50_d50`, `multiplier_h18_n32`, `bv_all_ones_n100`, `queko_bss_53`) at levels 0–3, and `su2_circular_n89` at 0–2 | `timing_e2e`, seed 0 |
+| `confirm-timing` | 20 cases: the heaviest scored input of each family (`qft_n100`, `square_heisenberg_n100`, `qaoa_ba_n100_3reps`, `qv_n50_d50`, `multiplier_h18_n32`, `bv_all_ones_n100`, `queko_bss_53`) at levels 0 and 3, `su2_circular_n89` at 0 and 2, and level 2 for the five inputs that T11, T14 and T17 do not already time. Level 1 is timed by T4 and T8 | `timing_e2e`, seed 0 |
 | `memory` | 9 cases, the same heavy inputs plus `multiplier_h18_n20` at level 2; 5 fresh processes each | `memory` |
 | `companion` | The same heavy inputs at level 2 over seeds 0–19 (only when layout or routing changed) | `timing_reuse` |
 
@@ -116,7 +116,7 @@ three-circuit iterations score to improve.
 | CA2 improvement | `CA2/improvement` | `ln(D2 score) + 2·SE < ln(0.99)`, a practical 1% reduction beyond seed noise |
 | CA3 breadth | `CA3/breadth` | At least 4 of the 8 families individually satisfy `ln(D2) + 2·SE < 0`, **and** removing any one family still leaves the score below 1 |
 | CA4 guards | `CA3/primary/N2`, `CA3/cx/*`, `CA3/ecr/*`, `CA4/family/<G>/<metric>`, `CA4/optimization_level/<L>/<metric>`, `CA4/cap/...`, `CA4/exact/...` | Every family and level summary has `ln(score) ≤ 3·SE` for `D2` and `N2`, and so does overall `N2`. Per-case caps (1.05). Deterministic, zero-baseline and canary cases exact. Band, topology and basis summaries are reported only |
-| CA5 cost | `CA5/timing`, `CA5/confirm-timing`, `CA5/memory`, `CA5/preset`, `CA5/companion` | Each panel within calibrated A/A noise, no per-case breach, clean control arm |
+| CA5 cost | `CA5/timing`, `CA5/timing-basis`, `CA5/confirm-timing`, `CA5/memory`, `CA5/preset`, `CA5/companion` | Each panel within calibrated A/A noise, no per-case breach, clean control arm. Timing panels screen with 4 rounds and measure 10 in full ([iterations-profile.md](iterations-profile.md#timing-panels)) |
 | CA6 completeness | `CA6/completeness` | Every observation present; determinism audit passed |
 
 Report-only numbers:
@@ -149,7 +149,7 @@ From the design probe on an Apple M1 Max, serial:
 | Quality compiles | About 15,000 compiles and 87 CPU-minutes per revision; routing replay roughly doubles this |
 | C1-lite | Provisional; one 23-qubit `ripple_adder_10` check took about 4 minutes in validation |
 | One decision, baseline cached | About 3.5 CPU-hours of quality work for the candidate; twice that the first time a baseline is used |
-| Cost panels | Confirm timing about 1.3 h, T1–T19 about 1 h, memory about 15 min, companion about 20 min, all on an exclusive machine |
+| Cost panels | Typically about 1 h on an exclusive machine when the screens are clear (confirm timing about 30 min, T1–T19 about 15 min, memory about 15 min); up to about 2.5 h with full 10-round counts and reruns. The `cx`/`ecr` twins add about 10 min when timed, the companion about 20 min. Design estimates, not measured runs |
 
 Quality is currently orchestrated serially. Plan for a long first run, and see
 [environments.md](environments.md) for build time.

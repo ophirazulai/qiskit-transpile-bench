@@ -14,6 +14,22 @@ from qtb.config import PROTOCOL
 from qtb.envbuild import SERIAL
 from qtb.errors import HarnessError
 
+# Measurement-protocol settings that only shape cost sessions.
+COST_PROTOCOL_KEYS = {
+    "warmups",
+    "minimum_calls",
+    "minimum_ns",
+    "screen_rounds",
+    "timing_rounds",
+    "companion_rounds",
+    "companion_seeds",
+    "memory_processes",
+    "rerun_multiplier",
+    "calibration_rounds",
+    "calibration_memory_processes",
+    "calibration_expiry_days",
+}
+
 
 def runner_lock():
     """One machine/user lock even when comparisons use different results roots."""
@@ -99,6 +115,11 @@ def quality_cache_key(
             "clifford_variant", "native_basis", "variant", "active_qubits",
         }
     }
+    # Cost-only protocol settings (rounds, warm-ups, minimum calls) never touch a
+    # quality compile, so changing them must not discard cached observations.
+    quality_protocol = {
+        k: v for k, v in measurement_protocol.items() if k not in COST_PROTOCOL_KEYS
+    }
     return digest(
         {
             "build": build["id"],
@@ -108,7 +129,7 @@ def quality_cache_key(
             "harness": harness_hash,
             "block": block,
             "mode": mode,
-            "measurement_protocol": measurement_protocol,
+            "measurement_protocol": quality_protocol,
             "worker_environment": dict(SERIAL, PYTHONHASHSEED=hash_seed),
         }
     )

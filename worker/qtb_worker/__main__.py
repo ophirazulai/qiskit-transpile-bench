@@ -20,7 +20,8 @@ def main():
     verify_provenance(job["build"])
     output = Path(args.out)
     output.mkdir(parents=True, exist_ok=True)
-    inputs = load_inputs(job)
+    # A timing batch loads each entry's inputs as it reaches them.
+    inputs = None if job["mode"] == "timing_batch" else load_inputs(job)
     with (output / "results.jsonl").open("ab", buffering=0) as stream:
         for seed in job["seeds"]:
             result = {"protocol": PROTOCOL, "mode": job["mode"], "seed": seed}

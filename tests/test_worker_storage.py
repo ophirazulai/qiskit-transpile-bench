@@ -88,6 +88,11 @@ def test_cache_scopes_and_decision_count(tmp_path):
         {"id": "x"}, case, dict(machine, cpu="M2"), {"rounds": 30}, "h"
     )
     assert stable != quality_cache_key({"id": "x"}, case, machine, {"rounds": 31}, "h")
+    # Cost-only protocol settings never reach a quality compile.
+    cost_only = {"timing_rounds": 6, "screen_rounds": 4, "minimum_calls": 2, "warmups": 1}
+    assert stable == quality_cache_key(
+        {"id": "x"}, case, machine, dict({"rounds": 30}, **cost_only), "h"
+    )
     with pytest.raises(HarnessError):
         quality_cache_key({"id": "x"}, case, {}, {}, "h", mode="memory")
     assert register_decision(tmp_path, "m", "r1") == 0
@@ -146,6 +151,22 @@ def test_worker_roundtrip_and_compile(tmp_path):
     assert row["status"] == "ok", row
     assert "D2" not in row and "N2" not in row
     assert Path(row["output"]).exists()
+
+
+def test_worker_times_a_whole_panel_in_one_process(tmp_path):
+    from qtb.coordinator.costs import timing_batch_job
+
+    manifest, policy, _ = load_profile("iterations-profile")
+    cases = [c for c in manifest["cases"] if c["case_id"] in {"T1", "T2", "preset/cz"}]
+    job = timing_batch_job(cases, data_root() / "fixtures", policy["measurement_protocol"])
+    job["minimum_ns"] = 0
+    rows = run_worker(local_build(), job, tmp_path / "batch")
+    assert [row["status"] for row in rows] == ["ok"] * 3, rows
+    assert [row["case_id"] for row in rows] == [c["case_id"] for c in cases]
+    assert [row["timing_mode"] for row in rows] == ["timing_e2e", "timing_e2e", "preset_build"]
+    assert [row["timing_seed"] for row in rows] == [20220125, 20220125, 0]
+    assert all(len(row["samples_ns"]) >= 2 and min(row["samples_ns"]) > 0 for row in rows)
+    assert len(list((tmp_path / "batch").glob("retry-*"))) == 0
 
 
 @pytest.mark.parametrize("failure", ["timeout", "exit"])

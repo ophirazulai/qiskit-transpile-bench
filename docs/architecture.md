@@ -104,6 +104,7 @@ process.
 | `prefix` | Like `quality`, with `pipeline_edits` such as `drop_stage:optimization` | Truncated-pipeline outputs for routing replay and Clifford checks |
 | `timing_e2e` | Warm up, then time complete `transpile()` calls | Raw nanosecond samples |
 | `timing_reuse` | Build the pass manager outside the clock, then time `pm.run()` | Raw samples |
+| `timing_batch` | Run every `timing_e2e`, `timing_reuse` and `preset_build` case of a panel in one process, one result row per case | Raw samples per case |
 | `preset_build` | Time `generate_preset_pass_manager(...)` alone | Raw samples |
 | `memory` | One compile in a fresh process | Setup and peak RSS in bytes |
 | `diagnostics` | One untimed compile with a pass callback | Per-pass times (report-only) |
@@ -136,7 +137,8 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
    them with a different `PYTHONHASHSEED`, and must reproduce identical outputs.
 9. **Cost:** timing and memory panels, measured only if the improvement test passed and
    nothing has failed. The three arms (baseline, control, evolved) are interleaved in random
-   order, each round in a fresh process.
+   order, each round in a fresh process per arm. A short screen ends a clearly clean panel
+   early; otherwise the panel is measured in full and, on a candidate-only breach, rerun once.
 10. **Decision.** The evaluator combines all records into a verdict. The reporter writes
     `decision.json` and `report.md`, and the decision is counted in
     `results/decision-counts.json`.

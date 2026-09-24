@@ -158,22 +158,34 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
                 (memory: equal weight per family)
 ```
 
-- **Protocol** (`policy.json` → `measurement_protocol`): 10 rounds per arm for timing panels
-  (3 per seed for the companion, 5 processes for memory). Each round is a fresh process with
-  one warm-up call, then timed calls until at least 3 calls and 1 s have accumulated. The
-  three arms (baseline, control, evolved) run interleaved in random order. Nothing else may
-  run: the coordinator takes an exclusive machine lock and refuses to start if the load
-  average is above half the core count.
-- **A/A calibration:** the baseline and control builds are measured 30 times each (10 memory
-  processes). 1,000 bootstrap resamples at decision sample sizes give `noise_panel`, the 95th
-  percentile of `|ln_panel|` floored at `ln(1.01)`, and a per-case absolute noise floor.
-  Calibration refuses to freeze if `noise_panel` exceeds `ln(1.05)`.
+- **Protocol** (`policy.json` → `measurement_protocol`): timing panels are measured in up to
+  three regimes, each a fresh session: a `screen_rounds` screen (4), a `timing_rounds` full
+  measurement (6 in the iterations profile, 10 in confirm) and a rerun at `rerun_multiplier`
+  times the full count. The companion has 3 rounds per seed and memory 5 processes, each with
+  a doubled rerun and no screen. A timing round is one fresh process per arm that loads,
+  warms up (`warmups` = 1 call) and times every case of the panel in manifest order, timing
+  each until at least `minimum_calls` (2) calls and `minimum_ns` (1 s) have accumulated; the
+  companion and memory use one fresh process per arm and case. The three arms (baseline,
+  control, evolved) run interleaved in random order within each round. Nothing else may run:
+  the coordinator takes an exclusive machine lock and refuses to start if the load average is
+  above half the core count.
+- **A/A calibration:** the baseline and control builds are measured `calibration_rounds`
+  (30) times each (`calibration_memory_processes` = 10 for memory). 1,000 bootstrap resamples
+  at each regime's sample size give that regime's `noise_panel`, the 95th percentile of
+  `|ln_panel|` floored at `ln(1.01)`, and a per-case absolute noise floor. Calibration refuses
+  to freeze if any regime's `noise_panel` exceeds `ln(1.05)`.
 - **Guard:** a panel breaches if `ln_panel > noise_panel`, or if any case is more than 10%
   slower **and** slower by more than its noise floor.
-- **Control arm:** if baseline versus control breaches, the machine was noisier than
-  calibrated and the result is `unresolved`, not blamed on the candidate.
+- **Screen:** the screen passes only when the candidate's `ln_panel` is inside the **full**
+  regime's `noise_panel` (the screen's own band is wider) with no per-case breach at the
+  screen's floors, and the control arm is clean. A clear screen is a `passed` panel; anything
+  else discards nothing but proceeds to the full measurement in a fresh session.
+- **Control arm:** if baseline versus control breaches in the full measurement, the machine
+  was noisier than calibrated and the result is `unresolved`, not blamed on the candidate.
 - **One rerun:** if only the candidate breaches, the whole panel is measured once more with
   doubled rounds. A breach again → `failed`; a pass → `passed_on_rerun`.
+- **Null rejection rate:** calibration bootstraps the whole sequence (screen → full → rerun)
+  on the two baseline builds, so the reported cost false-rejection rate includes the screen.
 
 Cost is measured only when the improvement test passed and nothing has failed, because it
 needs an exclusive machine and hours of wall time.

@@ -19,6 +19,7 @@ MODES = [
     "prefix",
     "timing_e2e",
     "timing_reuse",
+    "timing_batch",
     "preset_build",
     "memory",
     "diagnostics",

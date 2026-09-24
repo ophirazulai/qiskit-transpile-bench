@@ -11,11 +11,27 @@
         "prefix",
         "timing_e2e",
         "timing_reuse",
+        "timing_batch",
         "preset_build",
         "memory",
         "diagnostics",
         "api_checks"
       ]
+    },
+    "batch": {
+      "description": "timing_batch only: one entry per timed case; `seeds` indexes this list",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "case": {"$ref": "#/properties/case"},
+          "mode": {"enum": ["timing_e2e", "timing_reuse", "preset_build"]},
+          "seed": {"type": "integer", "minimum": 0}
+        },
+        "required": ["case", "mode", "seed"],
+        "additionalProperties": false
+      }
     },
     "case": {
       "type": "object",
@@ -239,12 +255,20 @@
   "required": [
     "protocol",
     "mode",
-    "case",
     "fixture_root",
     "seeds",
     "build",
     "timeout_s"
   ],
+  "if": {
+    "properties": {"mode": {"const": "timing_batch"}}
+  },
+  "then": {
+    "required": ["batch", "warmups", "minimum_calls", "minimum_ns"]
+  },
+  "else": {
+    "required": ["case"]
+  },
   "additionalProperties": true,
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qiskit-transpile-bench.invalid/schemas/job/1"

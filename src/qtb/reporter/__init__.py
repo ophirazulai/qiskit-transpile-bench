@@ -253,14 +253,17 @@ def render_report(decision):
         "",
         "## Compilation cost",
         "",
-        "| Panel | Result | Candidate log ratio | Control log ratio |",
-        "| --- | --- | ---: | ---: |",
+        "| Panel | Result | Regime | Candidate log ratio | Control log ratio |",
+        "| --- | --- | --- | ---: | ---: |",
     ]
     for row in decision["constraints"]:
         if row["kind"] == "cost" and "candidate" in row:
+            regime = row.get("regime", "normal")
+            if "count" in row:
+                regime += f" ({row['count']} rounds)"
             lines.append(
-                f"| {row['id']} | {row['result']} | {row['candidate']['ln_panel']:.6f} | "
-                f"{row['control']['ln_panel']:.6f} |"
+                f"| {row['id']} | {row['result']} | {regime} | "
+                f"{row['candidate']['ln_panel']:.6f} | {row['control']['ln_panel']:.6f} |"
             )
     lines += [
         "",

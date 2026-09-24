@@ -20,18 +20,37 @@ class CalibrationIncomplete(Incomplete):
         self.phase = phase
 
 
+def unknown_scope(comparison):
+    """A change that maps to every stage, or to unmapped paths, could affect anything."""
+    return any(
+        set(value["stages"]) == set(STAGES) or value.get("unmapped_paths")
+        for value in comparison.run["scope"].values()
+    )
+
+
 def cost_panels(comparison, all_panels=False):
+    """Cost panels to measure for this comparison's change scope.
+
+    ``timing``, ``confirm-timing``, ``memory`` and ``preset`` are always measured.
+    ``timing-basis`` (the cx/ecr twins of the scored circuits) is measured only
+    when the change can reach translation or optimization, since it repeats the
+    cz cases' layout and routing. The multi-seed ``companion`` is measured only
+    when the change can reach layout or routing. Calibration takes every panel.
+    """
     cases = comparison.manifest["cases"]
     panels = {
         name: (
             [c for c in cases if c.get("panel") == name],
             "memory" if name == "memory" else "timing",
         )
-        for name in ("timing", "preset", "confirm-timing", "memory")
+        for name in ("timing", "timing-basis", "preset", "confirm-timing", "memory")
     }
     panels = {name: pair for name, pair in panels.items() if pair[0]}
     scope = {s for value in comparison.run["scope"].values() for s in value["stages"]}
-    if all_panels or scope & {"layout", "routing"}:
+    unknown = all_panels or unknown_scope(comparison)
+    if not unknown and not scope & {"translation", "optimization"}:
+        panels.pop("timing-basis", None)
+    if unknown or scope & {"layout", "routing"}:
         if comparison.run["profile"] == "confirm-profile":
             groups = {
                 c["input_group"]
@@ -59,10 +78,7 @@ def cost_panels(comparison, all_panels=False):
 def required_cost_panels(comparison):
     """The preset panel is measured always, but guarded for relevant or unknown scope."""
     panels = cost_panels(comparison)
-    scope = comparison.run["scope"].values()
-    preset_scope = any(
-        set(value["stages"]) == set(STAGES) or value.get("unmapped_paths") for value in scope
-    )
+    preset_scope = unknown_scope(comparison)
     changed_paths = (
         path.lower().replace("\\", "/") for path in comparison.run.get("changed_paths", [])
     )

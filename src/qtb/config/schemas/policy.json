@@ -48,9 +48,28 @@
         "quality_batch_size": {"type": "integer", "minimum": 1, "maximum": 25},
         "warmups": {"type": "integer", "minimum": 0},
         "minimum_calls": {"type": "integer", "minimum": 1},
-        "minimum_ns": {"type": "integer", "minimum": 0}
+        "minimum_ns": {"type": "integer", "minimum": 0},
+        "screen_rounds": {"type": "integer", "minimum": 0},
+        "timing_rounds": {"type": "integer", "minimum": 1},
+        "companion_rounds": {"type": "integer", "minimum": 1},
+        "memory_processes": {"type": "integer", "minimum": 1},
+        "rerun_multiplier": {"type": "integer", "minimum": 2},
+        "calibration_rounds": {"type": "integer", "minimum": 2},
+        "calibration_memory_processes": {"type": "integer", "minimum": 2}
       },
-      "required": ["quality_batch_size", "warmups", "minimum_calls", "minimum_ns"]
+      "required": [
+        "quality_batch_size",
+        "warmups",
+        "minimum_calls",
+        "minimum_ns",
+        "screen_rounds",
+        "timing_rounds",
+        "companion_rounds",
+        "memory_processes",
+        "rerun_multiplier",
+        "calibration_rounds",
+        "calibration_memory_processes"
+      ]
     },
     "upstream_test_budgets_s": {
       "type": "object",

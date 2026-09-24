@@ -155,8 +155,24 @@ for details.
 | Whole `smoke` run, first time | About 1 h 20 min, almost all of it building |
 | Iterations quality compiles | About 10 CPU-minutes per revision, roughly doubled by routing replay |
 | Confirm quality compiles | About 3.5 CPU-hours for the candidate once the baseline is cached |
-| Timing panels | About 1 h (iterations) and about 3 h (confirm), on an otherwise idle machine |
-| First `compare` against a new baseline | Also pays for calibration and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days |
+| Cost panels, iterations | Typically 10–15 min; up to about 40 min when a candidate sits near the noise band and needs the full count and a rerun. Add roughly 20 min for the multi-seed companion when the change touches layout or routing |
+| Cost panels, confirm | Typically 1 h; up to about 2.5 h with full counts and reruns |
+| First `compare` against a new baseline | Also pays for calibration (30 A/A rounds of every cost panel, about 1 h for iterations and 2.5 h for confirm) and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days |
+
+Cost panels are estimates from the design probes, not measured runs: no full comparison with
+cost measurement has been recorded yet. They run only after the quality test has passed, on an
+otherwise idle machine.
+
+**Why the cost panels are this fast.** Each panel starts with a 4-round *screen*. If the
+candidate's compile time already sits inside the noise band of the full measurement (and no
+single case is more than 10% slower), the panel stops there. Otherwise it is measured in full
+(6 rounds in the iterations profile, 10 in confirm) and, on a candidate-only breach, once more
+with doubled rounds. Every round is one fresh process per arm that times the whole panel, so
+Python and Qiskit start-up is paid 3 times per round instead of once per case. The `cx`/`ecr`
+twins of the scored circuits are timed only when the change can reach translation or
+optimization, since they repeat the `cz` cases' layout and routing. See
+[iterations-profile.md](docs/iterations-profile.md#timing-panels) and
+[metrics.md](docs/metrics.md#6-cost-time-and-memory).
 
 Disk: about 2 GB per built revision, 5–7 GB per run. Run directories are never deleted
 automatically.
