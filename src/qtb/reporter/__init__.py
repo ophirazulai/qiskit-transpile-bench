@@ -11,8 +11,12 @@ from qtb.errors import HarnessError
 from qtb.evaluator import verdict
 
 
-def make_decision(run, records, required_ids, summaries):
+def make_decision(run, records, required_ids, summaries, observations=()):
     status = verdict(records, required_ids)
+    fingerprints = {}
+    for row in observations:
+        if row.get("seed_block") == "B0" and row.get("seed") == 0 and row.get("fingerprint"):
+            fingerprints.setdefault(row["case_id"], {})[row["revision"]] = row["fingerprint"]
     decision = {
         "format": "qtb-decision/1",
         "status": status,
@@ -33,6 +37,13 @@ def make_decision(run, records, required_ids, summaries):
         "scope": run.get("scope", {}),
         "review": None,
         "measurement_timestamp": run.get("created_at"),
+        "calibration": run.get("calibrations", {}).get("false_rejection"),
+        "fingerprint_changes": {
+            case: pair
+            for case, pair in sorted(fingerprints.items())
+            if pair.get("baseline") != pair.get("evolved")
+        },
+        "coverage_gaps": run.get("coverage_gaps", []),
         "reasons": [
             {"code": r["id"], "result": r["result"], "detail": r.get("detail", "")}
             for r in records
@@ -55,6 +66,14 @@ def render_report(decision):
         "This verdict concerns the fixed workload and its declared semantic contracts.",
         "",
     ]
+    calibration = decision.get("calibration")
+    if calibration:
+        lines += [
+            f"Noisy guards: {calibration['noisy_guard_count']}. Calibrated family-wise "
+            f"false-rejection estimate: {calibration['combined']:.2%} "
+            f"(quality {calibration['quality']:.2%}; cost {calibration['cost']:.2%}).",
+            "",
+        ]
     if decision["reasons"] or decision["missing_records"]:
         lines += ["## Constraints needing attention", ""]
         for reason in decision["reasons"]:
@@ -74,6 +93,18 @@ def render_report(decision):
                 f"| {name} | {summary['score']:.6f} | {summary['SE']:.6f} | "
                 f"{summary['ln_score_plus_2SE']:.6f} |"
             )
+    bootstrap = decision["summaries"].get("instance_bootstrap")
+    if bootstrap:
+        lines += [
+            "",
+            "Instance bootstrap (report-only): "
+            + (
+                f"95% upper log effect {bootstrap['U_instance']:.6f}."
+                if bootstrap.get("status") == "reported"
+                else bootstrap.get("reason", "Unavailable")
+            ),
+            "",
+        ]
     lines += [
         "",
         "## Per-case changes",
@@ -86,6 +117,19 @@ def render_report(decision):
             item = next(iter(summary["cases"].values()))
             lines.append(
                 f"| {name.split('/cap/', 1)[1]} | {summary['score']:.6f} | {item['worst_seed']} |"
+            )
+    lines += [
+        "",
+        "## Compilation cost",
+        "",
+        "| Panel | Result | Candidate log ratio | Control log ratio |",
+        "| --- | --- | ---: | ---: |",
+    ]
+    for row in decision["constraints"]:
+        if row["kind"] == "cost" and "candidate" in row:
+            lines.append(
+                f"| {row['id']} | {row['result']} | {row['candidate']['ln_panel']:.6f} | "
+                f"{row['control']['ln_panel']:.6f} |"
             )
     lines += [
         "",
@@ -107,6 +151,17 @@ def render_report(decision):
         "`qiskit-transpile-bench repro <observation-id> --run <run-directory>` exports its job.",
         "",
     ]
+    for gap in decision.get("coverage_gaps", []):
+        lines.append(f"- Declared workload gap: {gap}")
+    changes = decision.get("fingerprint_changes", {})
+    if changes:
+        lines += [
+            "",
+            "Pipeline fingerprints changed for: " + ", ".join(f"`{c}`" for c in changes) + ".",
+            "Pass names and observed search budgets are archived in `decision.json`; "
+            "unavailable budget fields remain `unknown`.",
+            "",
+        ]
     if decision.get("review"):
         lines += [
             "## Human review",

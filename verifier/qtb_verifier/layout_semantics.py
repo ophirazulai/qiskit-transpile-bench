@@ -101,9 +101,14 @@ def measurement_distance(a, b):
         x, y = left.get(outcome), right.get(outcome)
         p = float(np.vdot(x, x).real) if x is not None else 0.0
         q = float(np.vdot(y, y).real) if y is not None else 0.0
-        overlap = abs(np.vdot(x, y)) ** 2 if x is not None and y is not None else 0.0
         tvd += abs(p - q) / 2
-        distance += math.sqrt(max(0.0, (p + q) ** 2 - 4 * overlap)) / 2
+        # Avoid subtracting nearly equal O(1) squares: that would turn exact
+        # equivalence into an artificial O(sqrt(epsilon)) trace distance.
+        orthogonal = 0.0
+        if p and q:
+            residual = y - x * (np.vdot(x, y) / p)
+            orthogonal = float(np.vdot(residual, residual).real)
+        distance += math.sqrt((p - q) ** 2 + 4 * p * orthogonal) / 2
     return tvd, distance
 
 

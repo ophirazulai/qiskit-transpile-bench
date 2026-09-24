@@ -16,7 +16,14 @@ from qtb.errors import HarnessError
 def run_worker(build, job, directory, hash_seed="0"):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
-    job = dict(job, protocol=PROTOCOL, build=build)
+    # The full source inventory belongs to run/build metadata, not every seed
+    # job. Workers need only the immutable identity and import provenance.
+    worker_build = {
+        k: build[k]
+        for k in ("id", "python", "environment", "provenance", "wheel", "wheel_sha256")
+        if k in build
+    }
+    job = dict(job, protocol=PROTOCOL, build=worker_build)
     validate("job", job)
     write_json(directory / "job.json", job)
     scratch = directory / "scratch"

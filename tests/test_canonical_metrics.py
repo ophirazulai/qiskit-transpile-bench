@@ -89,3 +89,30 @@ def test_payload_affects_hash():
     assert digest(op("evolution", [0], payload={"hamiltonian": "X"})) != digest(
         op("evolution", [0], payload={"hamiltonian": "Z"})
     )
+
+
+def test_streamed_union_keeps_idle_logical_positions_and_excludes_barriers(tmp_path):
+    from qtb.coordinator import structural_result
+
+    header = dict(
+        format=CIRCUIT_FORMAT,
+        num_qubits=30,
+        num_clbits=0,
+        qregs=[["q", 30]],
+        cregs=[],
+        global_phase=(0.0).hex(),
+        parameters=[],
+    )
+    mapping = layout(list(range(30)), list(range(30)))
+    mapping["input_num_qubits"] = 3
+    target = dict(
+        num_qubits=30,
+        native_2q_names=[],
+        instructions=[dict(name="x", arity=1, parameters=[], qargs=None)],
+    )
+    path = tmp_path / "output.gz"
+    hash_ = write_circuit(path, header, [op("x", [27]), op("barrier", list(range(30)))])
+    result = structural_result(path, target, mapping, 3)
+    assert result["status"] == "verified"
+    assert result["union_width"] == 4
+    assert result["output_hash"] == hash_

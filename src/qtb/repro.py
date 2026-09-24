@@ -1,6 +1,7 @@
 """Self-contained single-observation reproducers from archived wheels and fixtures."""
 
 import shutil
+import zipfile
 from pathlib import Path
 
 from qtb.canonical import read_json, safe_path, write_json
@@ -36,7 +37,7 @@ subprocess.run([str(python), "-P", "-c", code, str(python), "-P", "-m", "qtb_wor
 '''
 
 
-def export_reproducer(observation, run_directory, destination, locks):
+def export_reproducer(observation, run_directory, destination):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=False)
     job = read_json(observation["worker"]["job_file"])
@@ -47,25 +48,28 @@ def export_reproducer(observation, run_directory, destination, locks):
         artifacts.append(case["semantic_reference"])
     for artifact in artifacts:
         source = safe_path(job["fixture_root"], artifact["file"])
-        output = safe_path(destination/"fixtures", artifact["file"])
+        output = safe_path(destination / "fixtures", artifact["file"])
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, output)
-    wheels = destination/"wheels"
+    wheels = destination / "wheels"
     wheels.mkdir()
     revision_wheel = Path(job["build"].get("wheel", ""))
     if not revision_wheel.is_file():
         raise HarnessError("Reproducer requires the archived revision wheel")
-    shutil.copy2(revision_wheel, wheels/revision_wheel.name)
-    harness_wheels = list((Path(run_directory)/"harness-wheel").glob("*.whl"))
+    shutil.copy2(revision_wheel, wheels / revision_wheel.name)
+    harness_wheels = list((Path(run_directory) / "harness-wheel").glob("*.whl"))
     if len(harness_wheels) != 1:
         raise HarnessError("Reproducer requires one archived harness wheel")
-    shutil.copy2(harness_wheels[0], wheels/harness_wheels[0].name)
-    shutil.copy2(Path(locks)/"common.lock", destination/"common.lock")
-    write_json(destination/"job.json", job)
-    write_json(destination/"observation.json", observation)
-    (destination/"run.py").write_text(RUNNER)
-    (destination/"README.md").write_text(
+    shutil.copy2(harness_wheels[0], wheels / harness_wheels[0].name)
+    with zipfile.ZipFile(harness_wheels[0]) as archive:
+        (destination / "common.lock").write_bytes(archive.read("qtb/data/envs/common.lock"))
+    write_json(destination / "job.json", job)
+    write_json(destination / "observation.json", observation)
+    (destination / "run.py").write_text(RUNNER)
+    (destination / "README.md").write_text(
         "# Single-observation reproducer\n\nRun `python run.py` with the recorded Python version.\n"
         "The script installs the archived Qiskit and harness wheels into a fresh environment,\n"
-        "loads the frozen artifacts, verifies the native extension, and compiles the one recorded seed.\n")
+        "loads the frozen artifacts, verifies the native extension, "
+        "and compiles the one recorded seed.\n"
+    )
     return destination

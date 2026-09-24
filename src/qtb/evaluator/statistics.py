@@ -184,6 +184,8 @@ def sign_flip_calibration(guards, replicates=10000, rng_seed=20260924, multiplie
         "monte_carlo_SE": math.sqrt(rate * (1 - rate) / replicates),
         "replicates": replicates,
         "rng_seed": rng_seed,
-        "noisy_guard_count": len(guards),
+        "noisy_guard_count": sum(
+            g.get("se_guard", True) and estimate(g["deltas"])["SE"] > 0 for g in guards
+        ),
         "freeze_allowed": rate <= 0.1,
     }

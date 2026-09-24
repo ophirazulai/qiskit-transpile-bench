@@ -1,5 +1,7 @@
 """C5 schedule validation independent of the revision's timing helpers."""
 
+import math
+
 from qtb.canonical import numeric
 
 
@@ -16,6 +18,9 @@ def verify_schedule(operations, starts, durations, target):
     for op, start, duration in zip(operations, starts, durations, strict=True):
         name, qs, cs, _params, _payload = op
         wires = [("q", q) for q in qs] + [("c", c) for c in cs]
+        if not math.isfinite(start) or not math.isfinite(duration):
+            errors.append("Non-finite schedule value")
+            continue
         if start < 0 or duration < 0:
             errors.append("Negative start or duration")
         if any(start < ends.get(w, 0) for w in wires):
@@ -23,6 +28,9 @@ def verify_schedule(operations, starts, durations, target):
         alignment = constraints["acquire_alignment" if name == "measure" else "pulse_alignment"]
         if name not in {"barrier", "delay"} and start % alignment:
             errors.append("Alignment violation")
+        if name not in {"barrier", "delay", "measure"} and duration:
+            if duration % constraints["granularity"] or duration < constraints["min_length"]:
+                errors.append("Pulse duration violates granularity or minimum length")
         prop = support.get(name, {}).get(tuple(qs), {})
         if prop.get("duration") is not None and dt is not None:
             if abs(duration - round(numeric(prop["duration"]) / dt)) > 1e-8:

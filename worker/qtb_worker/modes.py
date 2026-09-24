@@ -128,6 +128,7 @@ def run_seed(job, seed, outdir, inputs):
     if mode == "api_checks":
         from qiskit import QuantumCircuit
         from qiskit.transpiler import Target
+
         before = digest(export_circuit(circuit))
         pm = preset(case, target, seed)
         first = pm.run(circuit)
@@ -151,7 +152,9 @@ def run_seed(job, seed, outdir, inputs):
             ("lookahead_control_flow", {"routing_method": "lookahead"}),
         ):
             try:
-                transpile(dynamic, target=target, optimization_level=2, seed_transpiler=seed, **options)
+                transpile(
+                    dynamic, target=target, optimization_level=2, seed_transpiler=seed, **options
+                )
                 error = None
             except Exception as exc:
                 error = type(exc).__name__
@@ -178,8 +181,6 @@ def run_seed(job, seed, outdir, inputs):
             "input_metadata": [circuit.metadata, other.metadata],
             "batch_metadata": [c.metadata for c in batch],
             "batch_hashes": [digest(export_circuit(c, opaque=True)) for c in batch],
-            "individual_hashes": [
-                digest(export_circuit(c, opaque=True)) for c in individual
-            ],
+            "individual_hashes": [digest(export_circuit(c, opaque=True)) for c in individual],
         }
     raise HarnessError(f"Unsupported worker mode: {mode}")

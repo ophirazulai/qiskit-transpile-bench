@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -10,6 +11,11 @@ from qtb.canonical import canonical_bytes, digest, read_json, write_json
 from qtb.config import PROTOCOL, case_hash
 from qtb.envbuild import SERIAL
 from qtb.errors import HarnessError
+
+
+def runner_lock():
+    """One machine/user lock even when comparisons use different results roots."""
+    return Path(tempfile.gettempdir()) / f"qtb-runner-{os.getuid()}.lock"
 
 
 @contextmanager
@@ -28,7 +34,24 @@ def append_record(path, row):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with locked(path.with_suffix(path.suffix + ".lock")):
-        with path.open("ab") as stream:
+        with path.open("a+b") as stream:
+            # A killed writer can leave an unterminated tail. Remove only that
+            # tail before appending so it cannot corrupt the next complete row.
+            end = stream.seek(0, os.SEEK_END)
+            if end:
+                stream.seek(end - 1)
+                if stream.read(1) != b"\n":
+                    cursor, boundary = end, 0
+                    while cursor:
+                        start = max(0, cursor - 65536)
+                        stream.seek(start)
+                        chunk = stream.read(cursor - start)
+                        found = chunk.rfind(b"\n")
+                        if found >= 0:
+                            boundary = start + found + 1
+                            break
+                        cursor = start
+                    stream.truncate(boundary)
             stream.write(canonical_bytes(row) + b"\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -88,3 +111,26 @@ def register_decision(root, manifest_hash, run_id):
         runs.append(run_id)
         write_json(path, state)
         return before
+
+
+def prune_outputs(directory, observations, limit):
+    """Retain failing/non-verified outputs; record every successful large-output deletion."""
+    directory = Path(directory).resolve()
+    path = directory / "retention.json"
+    pruned = read_json(path) if path.exists() else {}
+    for row in observations:
+        if not row.get("output") or not row.get("checks"):
+            continue
+        if any(check["status"] != "verified" for check in row["checks"]):
+            continue
+        output = Path(row["output"]).resolve()
+        if output.is_relative_to(directory) and output.exists() and output.stat().st_size > limit:
+            pruned[str(output)] = {
+                "output_hash": row["output_hash"],
+                "observation_id": row["id"],
+                "compressed_bytes": output.stat().st_size,
+            }
+            # Persist the reason and hash before deletion, preserving replay.
+            write_json(path, pruned)
+            output.unlink()
+    return pruned

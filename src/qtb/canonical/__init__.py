@@ -111,12 +111,14 @@ def _items(header, operations):
     yield from operations
 
 
-def circuit_lines(path):
+def circuit_lines(path, hasher=None):
     with gzip.open(path, "rb") as stream:
         for line in stream:
             value = json.loads(line)
             if canonical_bytes(value) + b"\n" != line:
                 raise HarnessError(f"Non-canonical circuit encoding: {path}")
+            if hasher is not None:
+                hasher.update(line)
             yield value
 
 
@@ -133,8 +135,8 @@ def read_circuit(path):
 
 def circuit_hash(path):
     h = hashlib.sha256()
-    for item in circuit_lines(path):
-        h.update(canonical_bytes(item) + b"\n")
+    for _item in circuit_lines(path, h):
+        pass
     return h.hexdigest()
 
 

@@ -7,9 +7,11 @@ from qtb.evaluator import record
 
 
 def behavior_checks(comparison, revisions=("baseline", "evolved")):
+    from qtb.coordinator import structural_result
+
     suite = read_json(comparison.fixtures / "correctness-suite.json")
-    statuses = []
     for revision in revisions:
+        statuses = []
         comparison.progress(
             f"{revision}: frozen C1–C5 regression suite ({len(suite['cases'])} configurations)."
         )
@@ -17,6 +19,15 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
             results = comparison.job(revision, case, "quality", range(case["seeds_per_block"]))
             for result in results:
                 checks = []
+                if result["status"] == "ok":
+                    structural = structural_result(
+                        result["output"],
+                        read_json(comparison.fixtures / case["target"]["file"]),
+                        result["layout"],
+                        case["logical_qubits"],
+                        case["options"].get("initial_layout"),
+                    )
+                    checks.append(dict(structural, oracle="C0"))
                 if result["status"] != "ok":
                     checks.append({"status": "mismatch", "detail": result.get("error")})
                 elif case["oracle"] == "C4":
@@ -77,7 +88,10 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                         and result["first_layout"] == result["again_layout"]
                         and result["batch_layouts"] == result["individual_layouts"]
                         and result["batch_metadata"] == result["input_metadata"]
-                        and all(r["exception_type"] == "TranspilerError" for r in result["negative_tests"])
+                        and all(
+                            r["exception_type"] == "TranspilerError"
+                            for r in result["negative_tests"]
+                        )
                     )
                 )
                 statuses.append("verified" if ok else "mismatch")
@@ -91,11 +105,21 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                             detail="API contract changed",
                         )
                     )
+        comparison.evidence(
+            record(
+                f"{comparison.prefix}1/C1-C5/{revision}",
+                "correctness",
+                "passed" if statuses and all(s == "verified" for s in statuses) else "unresolved",
+                "reference" if revision == "baseline" else "evolved",
+            )
+        )
+    required = {f"{comparison.prefix}1/C1-C5/{revision}" for revision in ("baseline", "evolved")}
+    passed = {r["id"] for r in comparison.records if r["result"] == "passed"}
     comparison.evidence(
         record(
             f"{comparison.prefix}1/C1-C5",
             "correctness",
-            "passed" if statuses and all(s == "verified" for s in statuses) else "unresolved",
+            "passed" if required <= passed else "unresolved",
         )
     )
 

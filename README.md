@@ -13,7 +13,7 @@ uv run qiskit-transpile-bench compare --baseline /path/to/baseline --evolved /pa
 uv run qiskit-transpile-bench compare --baseline /path/to/baseline --evolved /path/to/evolved --profile confirm-profile
 ```
 
-Python 3.11+, Git, uv, rustup, a C/C++ toolchain, and access to the pinned Python/Rust
+Linux or macOS, Python 3.11+, Git, uv, rustup, a C/C++ toolchain, and access to the pinned Python/Rust
 dependencies are required for source builds. Original source folders are never modified.
 Builds use independent virtual environments and release wheels, the baseline's Rust
 channel, locked dependencies, sanitized environment variables, and native-extension hashes.
@@ -39,6 +39,7 @@ run/session/arm bundle and are never reused for a different comparison.
 
 ```bash
 uv run qiskit-transpile-bench calibrate --baseline /path/to/baseline
+uv run qiskit-transpile-bench derive-exclusions results/runs/RUN
 uv run qiskit-transpile-bench evaluate results/runs/RUN
 uv run qiskit-transpile-bench report results/runs/RUN
 uv run qiskit-transpile-bench repro OBSERVATION_ID --run results/runs/RUN --out repro-job
@@ -47,7 +48,9 @@ uv run qiskit-transpile-bench review --decision results/runs/RUN/decision.json \
 ```
 
 `--results-root` selects the evidence directory. `--resume RUN_DIRECTORY` resumes an
-interrupted comparison against its archived snapshots and original manifest/policy.
+interrupted comparison against its archived snapshots and original manifest/policy. Resume
+and replay use the same coordinator version; install the archived harness wheel when
+inspecting an older run.
 `--change-scope scope.json` accepts `{"stages":["optimization"]}` and can only widen the
 scope inferred from changed source files. Unknown paths mean all stages.
 
@@ -65,3 +68,5 @@ uv run python tools/probes/confirm_panel.py
 The profile is the scope of the claim. Iterate with iterations-profile, then use confirm
 as a check. Repeated tuning on confirm invalidates its intended role. Reports retain the
 per-manifest decision count and the confirm score with the iteration inputs removed.
+
+See [format and compatibility rules](docs/versioning.md) for profile changes and archival replay.

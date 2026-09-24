@@ -55,6 +55,7 @@ class StructuralChecker:
     def __init__(self, header, target):
         self.header, self.target = header, target
         self.levels, self.n2, self.errors = {}, 0, []
+        self.active_qubits = set()
         self.dynamic = False
         self.support = {
             i["name"]: (i, None if i["qargs"] is None else {tuple(q) for q in i["qargs"]})
@@ -79,6 +80,8 @@ class StructuralChecker:
             return
         qs = [qmap[q] for q in qs] if qmap else qs
         cs = [cmap[c] for c in cs] if cmap else cs
+        if name != "barrier":
+            self.active_qubits.update(qs)
         if name not in DIRECTIVES:
             entry = self.support.get(name)
             if entry is None:

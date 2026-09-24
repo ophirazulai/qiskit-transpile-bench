@@ -33,7 +33,7 @@ def parser():
         command.add_argument("--results-root", type=Path, default=Path("results"))
         command.add_argument("--resume", type=Path)
         command.add_argument("--change-scope", type=Path)
-    for name in ("evaluate", "report"):
+    for name in ("evaluate", "report", "derive-exclusions"):
         command = commands.add_parser(name)
         command.add_argument("run", type=Path)
     review = commands.add_parser("review")
@@ -59,15 +59,21 @@ def main(argv=None):
             if args.command == "calibrate":
                 from qtb.coordinator.calibration import preflight
 
-                comparison.build()
+                comparison.build(need_evolved=False)
                 cases = [
                     c for c in comparison.manifest["cases"] if c["role"] not in {"timing", "memory"}
                 ]
-                comparison.roundtrip(cases)
+                comparison.roundtrip(comparison.roundtrip_cases(), revisions=("baseline",))
                 summary = preflight(comparison, cases)
                 write_json(comparison.directory / "calibration.json", summary)
                 print(f"Calibration evidence: {comparison.directory}")
-                return 0
+                return (
+                    0
+                    if summary["quality"]["freeze_allowed"]
+                    and summary["false_rejection"]["freeze_allowed"]
+                    and all(c["freeze_allowed"] for c in summary["cost"].values())
+                    else 40
+                )
             result = comparison.execute(smoke=args.command == "smoke")
             if args.command == "smoke":
                 print(f"SMOKE {'OK' if result['success'] else 'FAILED'}: {comparison.directory}")
@@ -80,6 +86,19 @@ def main(argv=None):
             decision = evaluate_run(args.run)
             print(f"{decision['status']} ({decision['profile']})")
             return EXIT_CODES[decision["status"]]
+        if args.command == "derive-exclusions":
+            from qtb.config import data_root
+            from qtb.coordinator.upstream import derive_exclusions
+
+            proposal = derive_exclusions(args.run, data_root() / "envs")
+            proposal_path = args.run / "exclusion-derivation/exclusions.proposed.json"
+            print(f"Unreviewed exclusion proposal: {proposal_path}")
+            return (
+                0
+                if proposal["ordinary"]["result"] == "passed"
+                and proposal["reshuffled"]["result"] != "unresolved"
+                else 40
+            )
         if args.command == "report":
             decision = read_json(args.run / "decision.json")
             write_report(args.run, decision)
@@ -96,9 +115,9 @@ def main(argv=None):
             observation = next((r for r in rows if r["id"] == args.observation_id), None)
             if observation is None:
                 raise HarnessError("Observation not found in this run")
-            from qtb.config import data_root
             from qtb.repro import export_reproducer
-            export_reproducer(observation, args.run, args.out, data_root()/"envs")
+
+            export_reproducer(observation, args.run, args.out)
             print(f"Reproducer: {args.out / 'run.py'}")
             return 0
         raise HarnessError("Unknown command")

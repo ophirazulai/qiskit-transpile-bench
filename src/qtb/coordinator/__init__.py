@@ -1,5 +1,6 @@
 """Comparison orchestration; this process never imports Qiskit."""
 
+import hashlib
 import random
 import subprocess
 import sys
@@ -8,7 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qtb.canonical import (
-    circuit_hash,
     circuit_lines,
     digest,
     file_hash,
@@ -17,14 +17,23 @@ from qtb.canonical import (
     verify_artifact,
     write_json,
 )
-from qtb.config import STAGES, case_hash, data_root, load_profile
+from qtb.config import (
+    STAGES,
+    case_hash,
+    coordinator_identity,
+    data_root,
+    implementation_identity,
+    load_profile,
+)
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.storage import (
     append_record,
     locked,
+    prune_outputs,
     quality_cache_key,
     read_records,
     register_decision,
+    runner_lock,
 )
 from qtb.envbuild import (
     baseline_toolchain,
@@ -34,6 +43,7 @@ from qtb.envbuild import (
     run_logged,
     sanitized_environment,
     snapshot,
+    verify_build,
 )
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator import evaluate_quality, record
@@ -44,13 +54,22 @@ from qtb.reporter import make_decision, write_report
 
 
 def structural_result(path, target, layout, input_width, initial_layout=None):
-    lines = circuit_lines(path)
+    hasher = hashlib.sha256()
+    lines = circuit_lines(path, hasher)
     header = next(lines)
     checker = StructuralChecker(header, target)
     for operation in lines:
         checker.consume(operation)
-    checker.errors.extend(layout_errors(layout, input_width, header["num_qubits"], initial_layout))
-    return checker.result()
+    errors = layout_errors(layout, input_width, header["num_qubits"], initial_layout)
+    checker.errors.extend(errors)
+    result = dict(checker.result(), output_hash=hasher.hexdigest())
+    if not errors:
+        initial = layout["initial_index_layout"] if layout else list(range(input_width))
+        final = layout["final_index_layout"] if layout else list(range(input_width))
+        result["union_width"] = len(
+            checker.active_qubits | set(initial[:input_width]) | set(final[:input_width])
+        )
+    return result
 
 
 class Comparison:
@@ -76,6 +95,13 @@ class Comparison:
         if resume:
             self.directory = Path(resume).resolve()
             self.run = read_json(self.directory / "run.json")
+            if self.run["hashes"].get("coordinator") != coordinator_identity():
+                raise HarnessError(
+                    "Resume with the archived harness version; coordinator code changed"
+                )
+            implementation = implementation_identity()
+            if self.run["hashes"].get("implementation", implementation) != implementation:
+                raise HarnessError("Resume with the archived worker and verifier implementation")
             if self.run["hashes"]["manifest"] != hashes["manifest"]:
                 raise HarnessError("Resumption requires the original manifest")
             if self.run["hashes"]["policy"] != hashes["policy"]:
@@ -98,11 +124,13 @@ class Comparison:
                 "machine": machine_identity(),
                 "builds": {},
                 "status": "created",
+                "coverage_gaps": self.manifest.get("coverage_gaps", []),
                 "sources": {
                     "baseline": str(Path(baseline).resolve()),
                     "evolved": str(Path(evolved or baseline).resolve()),
                 },
             }
+            self.run["hashes"]["coordinator"] = coordinator_identity()
             write_json(self.directory / "manifest.json", self.manifest)
             write_json(self.directory / "policy.json", self.policy)
             self.save()
@@ -115,7 +143,11 @@ class Comparison:
         self.records = [r for r in self.records if r["id"] != row["id"]] + [row]
         write_json(self.directory / "evidence.json", self.records)
 
-    def build(self, need_control=True):
+    def build(self, need_control=True, need_evolved=True):
+        with locked(runner_lock(), shared=True):
+            return self._build(need_control, need_evolved)
+
+    def _build(self, need_control=True, need_evolved=True):
         load_profile(self.run["profile"], self.data, verify=True)
         build_root = self.directory / "builds"
         build_root.mkdir(exist_ok=True)
@@ -150,12 +182,28 @@ class Comparison:
         if len(found) != 1:
             raise HarnessError("Expected exactly one harness wheel")
         self.run["hashes"]["harness"] = file_hash(found[0])
+        self.run["hashes"]["implementation"] = implementation_identity()
         toolchain = baseline_toolchain(snapshots["baseline"])
-        for revision in ["baseline", "evolved"] + (["control"] if need_control else []):
+        revisions = (
+            ["baseline"]
+            + (["evolved"] if need_evolved else [])
+            + (["control"] if need_control else [])
+        )
+        for revision in revisions:
             directory = build_root / f"{revision}-build"
             if (directory / "build.json").exists():
                 build = read_json(directory / "build.json")
+                verify_build(build)
+                if (
+                    build["snapshot"]["tree_hash"]
+                    != snapshots["baseline" if revision == "control" else revision]["tree_hash"]
+                ):
+                    raise HarnessError("Saved build does not match the source snapshot")
             else:
+                if directory.exists():
+                    directory.rename(
+                        directory.with_name(directory.name + ".failed-" + uuid.uuid4().hex[:8])
+                    )
                 self.progress(f"Building {revision} with baseline Rust toolchain {toolchain}.")
                 build = build_revision(
                     snapshots["baseline" if revision == "control" else revision],
@@ -163,6 +211,8 @@ class Comparison:
                     self.data / "envs",
                     found[0],
                     toolchain,
+                    cache_root=self.root / "build-cache",
+                    cache_slot=revision,
                 )
             self.run["builds"][revision] = build
             self.save()
@@ -207,15 +257,15 @@ class Comparison:
             "pipeline_edits": list(edits),
             "bindings": case.get("bindings", []),
         }
-        with locked(self.root / "exclusive-cost.lock", shared=True):
+        with locked(runner_lock(), shared=True):
             result = run_worker(self.run["builds"][revision], job, directory, hash_seed)
         for row in result:
             row["job_file"] = str(directory / "job.json")
         return result
 
-    def roundtrip(self, cases):
+    def roundtrip(self, cases, revisions=("baseline", "evolved")):
         seen = set()
-        for revision in ("baseline", "evolved"):
+        for revision in revisions:
             for case in cases:
                 key = revision, case["circuit"]["sha256"], case["target"]["sha256"]
                 if key in seen:
@@ -231,6 +281,16 @@ class Comparison:
                         f"Input roundtrip failed on {revision}: {case['case_id']}: {row}"
                     )
         self.evidence(record("harness/roundtrip", "harness", "passed"))
+
+    def roundtrip_cases(self):
+        cases = list(self.manifest["cases"])
+        cases.extend(read_json(self.fixtures / "correctness-suite.json")["cases"])
+        cases.extend(
+            dict(c, circuit=c["clifford_variant"])
+            for c in self.manifest["cases"]
+            if "clifford_variant" in c
+        )
+        return cases
 
     def oracle(self, case, result, oracle, reference=None, **extra):
         ref = reference or (
@@ -289,7 +349,7 @@ class Comparison:
                     case,
                     self.run["machine"],
                     self.policy["measurement_protocol"],
-                    self.run["hashes"]["harness"],
+                    self.run["hashes"]["implementation"],
                     block,
                 )
                 cache = self.root / "quality-cache" / key
@@ -300,7 +360,22 @@ class Comparison:
                         if path.exists():
                             cached = read_json(path)
                             if Path(cached["output"]).exists():
-                                cached.update(revision=revision, cached=True)
+                                cached.update(
+                                    revision=revision, cached=True, case_id=case["case_id"]
+                                )
+                                cached["id"] = digest(
+                                    {
+                                        k: cached[k]
+                                        for k in (
+                                            "case_id",
+                                            "case_hash",
+                                            "build_id",
+                                            "revision",
+                                            "seed",
+                                            "seed_block",
+                                        )
+                                    }
+                                )
                                 append_record(self.directory / "observations.jsonl", cached)
                                 continue
                         remaining.append(seed)
@@ -308,6 +383,13 @@ class Comparison:
                 for start in range(0, len(seeds), 25):
                     batch = seeds[start : start + 25]
                     rows = self.job(revision, case, "quality", batch)
+                    prefixes = (
+                        self.routing_batch(
+                            revision, case, [r["seed"] for r in rows if r["status"] == "ok"]
+                        )
+                        if not smoke
+                        else {}
+                    )
                     for result in rows:
                         observation = {
                             "format": "qtb-observation/1",
@@ -331,12 +413,17 @@ class Comparison:
                         observation["id"] = digest(
                             {
                                 k: observation[k]
-                                for k in ("case_hash", "build_id", "revision", "seed", "seed_block")
+                                for k in (
+                                    "case_id",
+                                    "case_hash",
+                                    "build_id",
+                                    "revision",
+                                    "seed",
+                                    "seed_block",
+                                )
                             }
                         )
                         if result["status"] == "ok":
-                            if circuit_hash(result["output"]) != result["output_hash"]:
-                                raise HarnessError("Exported output hash mismatch")
                             structural = structural_result(
                                 result["output"],
                                 target,
@@ -344,6 +431,8 @@ class Comparison:
                                 case["logical_qubits"],
                                 case["options"].get("initial_layout"),
                             )
+                            if structural["output_hash"] != result["output_hash"]:
+                                raise HarnessError("Exported output hash mismatch")
                             observation.update(
                                 {k: structural[k] for k in ("D2", "N2") if k in structural}
                             )
@@ -352,10 +441,11 @@ class Comparison:
                                 output_hash=result["output_hash"],
                                 layout=result["layout"],
                                 fingerprint=result.get("fingerprint", {}),
+                                free_parameters=result.get("free_parameters", []),
                             )
                             observation["checks"].append(dict(structural, oracle="C0"))
                             if not smoke and structural["status"] == "verified":
-                                self.check_routing(revision, case, observation)
+                                self.check_routing(revision, case, observation, prefixes)
                                 if (
                                     self.run["profile"] == "confirm-profile"
                                     and case["role"] == "scored"
@@ -363,8 +453,17 @@ class Comparison:
                                     and result["seed"] < 10
                                     and not observation.get("free_parameters")
                                 ):
-                                    observation["checks"].append(
+                                    union_width = structural["union_width"]
+                                    check = (
                                         self.oracle(case, result, "C1-lite")
+                                        if union_width <= 25
+                                        else {
+                                            "status": "unverified",
+                                            "detail": "Union width exceeds limit",
+                                        }
+                                    )
+                                    observation["checks"].append(
+                                        dict(check, oracle="C1-lite", union_width=union_width)
                                     )
                         else:
                             subject = "reference" if revision == "baseline" else "evolved"
@@ -382,16 +481,21 @@ class Comparison:
                             write_json(cache / f"{result['seed']}.json", observation)
         return read_records(self.directory / "observations.jsonl")
 
-    def check_routing(self, revision, case, observation):
+    def routing_batch(self, revision, case, seeds):
+        seeds = [seed for seed in seeds if case["role"] in {"scored", "guard"} or seed % 100 < 10]
+        if not seeds:
+            return {}
+        initial = self.job(revision, case, "prefix", seeds, [f"drop_stage:{s}" for s in STAGES[1:]])
+        routed = self.job(revision, case, "prefix", seeds, [f"drop_stage:{s}" for s in STAGES[3:]])
+        left, right = ({r["seed"]: r for r in rows} for rows in (initial, routed))
+        missing = {"status": "error"}
+        return {seed: (left.get(seed, missing), right.get(seed, missing)) for seed in seeds}
+
+    def check_routing(self, revision, case, observation, prefixes):
         seed = observation["seed"]
         if case["role"] not in {"scored", "guard"} and seed % 100 >= 10:
             return
-        initial = self.job(
-            revision, case, "prefix", [seed], [f"drop_stage:{s}" for s in STAGES[1:]]
-        )[0]
-        routed = self.job(
-            revision, case, "prefix", [seed], [f"drop_stage:{s}" for s in STAGES[3:]]
-        )[0]
+        initial, routed = prefixes[seed]
         if initial["status"] != "ok" or routed["status"] != "ok":
             observation["checks"].append(
                 {"oracle": "C6", "status": "unverified", "detail": "Prefix compilation failed"}
@@ -411,11 +515,11 @@ class Comparison:
         )
         observation["checks"].append(checked)
 
-    def audit(self, cases, observations):
+    def audit(self, cases, observations, revisions=("baseline", "evolved")):
         by_case = {c["case_id"]: c for c in cases}
         rng = random.Random(self.policy["rng_seed"])
         ok = True
-        for revision in ("baseline", "evolved"):
+        for revision in revisions:
             rows = [
                 r
                 for r in observations
@@ -541,6 +645,9 @@ class Comparison:
         )
 
     def finish(self):
+        from qtb.coordinator.costs import replay_costs
+
+        self.records = replay_costs(self.directory, self.run, self.manifest, self.records)
         rows = read_records(self.directory / "observations.jsonl")
         self.run["decisions_before"] = register_decision(
             self.root, self.run["hashes"]["manifest"], self.run["run_id"]
@@ -554,11 +661,15 @@ class Comparison:
             required = sorted(
                 set(required) | {f"{self.prefix}5/{name}" for name in cost_panels(self)}
             )
-        decision = make_decision(self.run, records, required, summaries)
+        decision = make_decision(self.run, records, required, summaries, rows)
         self.run["status"] = "complete"
         self.save()
         write_json(self.directory / "evidence.json", self.records)
         write_report(self.directory, decision)
+        if decision["status"] in {"PASS", "NO_IMPROVEMENT"}:
+            prune_outputs(
+                self.directory, rows, self.policy["measurement_protocol"]["output_retention_bytes"]
+            )
         return decision
 
     def execute(self, smoke=False):
@@ -569,7 +680,7 @@ class Comparison:
         )
         try:
             self.build(need_control=not smoke)
-            self.roundtrip(cases)
+            self.roundtrip(cases if smoke else self.roundtrip_cases())
             if not smoke:
                 from qtb.coordinator.calibration import preflight
                 from qtb.coordinator.checks import behavior_checks, clifford_checks
@@ -669,13 +780,19 @@ def evaluate_run(directory):
     )
     if digest(manifest) != run["hashes"]["manifest"] or digest(policy) != run["hashes"]["policy"]:
         raise HarnessError("Archived manifest or policy hash changed")
+    if run["hashes"].get("coordinator", coordinator_identity()) != coordinator_identity():
+        raise HarnessError("Replay with the archived harness version; coordinator code changed")
     rows = read_records(directory / "observations.jsonl")
     evidence = (
         read_json(directory / "evidence.json") if (directory / "evidence.json").exists() else []
     )
+    from qtb.coordinator.costs import replay_costs
+
+    evidence = replay_costs(directory, run, manifest, evidence)
     records, required, summaries = evaluate_quality(manifest, policy, rows, evidence)
     if "scope" in run:
         from types import SimpleNamespace
+
         from qtb.coordinator.calibration import cost_panels
 
         prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
@@ -686,7 +803,7 @@ def evaluate_run(directory):
                 for name in cost_panels(SimpleNamespace(manifest=manifest, run=run))
             }
         )
-    decision = make_decision(run, records, required, summaries)
+    decision = make_decision(run, records, required, summaries, rows)
     if (directory / "decision.json").exists():
         decision["review"] = read_json(directory / "decision.json").get("review")
     write_report(directory, decision)

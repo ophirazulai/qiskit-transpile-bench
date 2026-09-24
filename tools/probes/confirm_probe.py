@@ -4,7 +4,7 @@ Behind section 3.7 of design/transpilation-benchmark-impl-plan.md.  For each (in
 target) pair and each optimization level 0-3 it records, at the baseline build and in the
 serial reference environment: circuit facts, wall time of one transpile() call, and D2/N2
 over transpiler seeds 0-2.  Output: confirm_probe.jsonl (one record per compile).
-Run from the repository root with the project virtualenv:  python design/probes/confirm_probe.py
+Run with the installed baseline Qiskit: python tools/probes/confirm_probe.py --source /path/to/qiskit
 """
 import json, os, sys, time, warnings, traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -13,9 +13,18 @@ warnings.filterwarnings("ignore")
 os.environ.update({"QISKIT_PARALLEL": "FALSE", "QISKIT_IGNORE_USER_SETTINGS": "TRUE", "RAYON_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"})
 os.environ.pop("QISKIT_SABRE_ALL_THREADS", None)
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-sys.path.insert(0, ROOT)
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confirm_probe.jsonl")
 QASM = os.path.join(ROOT, "test", "benchmarks", "qasm")
+
+
+def configure_source(source):
+    """Expose benchmark modules without exposing an unbuilt Qiskit source package."""
+    import types
+    global QASM
+    QASM = os.path.join(source, "test", "benchmarks", "qasm")
+    package = types.ModuleType("test")
+    package.__path__ = [os.path.join(source, "test")]
+    sys.modules["test"] = package
 
 SEEDS = [0, 1, 2]
 HEAVY = {  # case_id -> seeds per level for expensive cases
@@ -237,7 +246,19 @@ def run_one(case_id, circ_name, tgt_name, level, seed):
 
 
 def main():
-    only = set(sys.argv[1:])
+    import argparse
+    global OUT
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--out", default="results/confirm-probe.jsonl")
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("cases", nargs="*")
+    args = parser.parse_args()
+    source = os.path.abspath(args.source)
+    configure_source(source)
+    OUT = os.path.abspath(args.out)
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    only = set(args.cases)
     done = set()
     if os.path.exists(OUT):
         for line in open(OUT):
@@ -267,7 +288,8 @@ def main():
     # heavy first so they don't straggle
     order = {"hwb12": 0, "su2_circ_89": 1}
     jobs.sort(key=lambda j: order.get(j[0], 5))
-    with ProcessPoolExecutor(max_workers=6) as ex, open(OUT, "a") as f:
+    with ProcessPoolExecutor(max_workers=args.workers, initializer=configure_source,
+                             initargs=(source,)) as ex, open(OUT, "a") as f:
         futs = {ex.submit(run_one, *j): j for j in jobs}
         for i, fut in enumerate(as_completed(futs)):
             r = fut.result()

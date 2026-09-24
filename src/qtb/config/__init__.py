@@ -1,12 +1,13 @@
 """Strict contracts and versioned profile loading."""
 
+import importlib.util
 import math
 from importlib.resources import files
 from pathlib import Path
 
 import jsonschema
 
-from qtb.canonical import digest, read_json, verify_artifact
+from qtb.canonical import digest, file_hash, read_json, verify_artifact
 from qtb.errors import HarnessError
 
 PROTOCOL = "qtb-worker/1"
@@ -30,6 +31,32 @@ def data_root():
     if installed.is_dir():
         return installed
     return Path(__file__).resolve().parents[3]
+
+
+def coordinator_identity():
+    root = Path(__file__).resolve().parents[1]
+    return digest(
+        {
+            str(p.relative_to(root)): file_hash(p)
+            for p in sorted(root.rglob("*.py"))
+            if "data" not in p.relative_to(root).parts
+        }
+    )
+
+
+def implementation_identity():
+    """Code/schema identity excludes profile data so unchanged cases stay reusable."""
+    entries = {}
+    for package in ("qtb", "qtb_worker", "qtb_verifier"):
+        spec = importlib.util.find_spec(package)
+        if spec is None or not spec.submodule_search_locations:
+            raise HarnessError(f"Missing installed harness package: {package}")
+        root = Path(next(iter(spec.submodule_search_locations)))
+        for path in sorted(root.rglob("*")):
+            relative = path.relative_to(root)
+            if "data" not in relative.parts and path.suffix in {".py", ".json"}:
+                entries[f"{package}/{relative}"] = file_hash(path)
+    return digest(entries)
 
 
 def validate(kind, value):
@@ -79,5 +106,5 @@ def load_profile(name, root=None, verify=True):
 
 def case_hash(case):
     # Panel membership and weights affect evaluation, not the compiled observation.
-    excluded = {"weight", "panel", "family", "size_band", "provenance"}
+    excluded = {"case_id", "weight", "panel", "family", "size_band", "provenance"}
     return digest({k: v for k, v in case.items() if k not in excluded})

@@ -55,6 +55,7 @@ def test_symbolic_expression_and_delay_roundtrip():
     circuit.global_phase = p / 3
     circuit.rx(2 * p + q.sin(), 0)
     circuit.rz(p * q**2, 1)
+    circuit.ry((p + 1) / 3, 1)
     circuit.delay(24, 0, unit="ns")
     data = export_circuit(circuit)
     assert export_circuit(import_circuit(data)) == data
@@ -157,10 +158,31 @@ def test_dynamic_branch_and_reset_mutations():
     assert verify_dynamic(a, b)["status"] == "verified"
     b.x(1)
     assert verify_dynamic(a, b)["status"] == "mismatch"
+    assert verify_dynamic(a, QuantumCircuit(2, 2))["status"] == "mismatch"
 
 
 def test_coherent_control_exposes_global_phase_error():
-    a=QuantumCircuit(1);a.h(0)
-    b=a.copy();b.global_phase=.2
-    assert verify_unitary(a,b,None)['status']=='verified'
-    assert verify_unitary(a,b,None,controlled=True)['status']=='mismatch'
+    a = QuantumCircuit(1)
+    a.h(0)
+    b = a.copy()
+    b.global_phase = 0.2
+    assert verify_unitary(a, b, None)["status"] == "verified"
+    assert verify_unitary(a, b, None, controlled=True)["status"] == "mismatch"
+
+
+def test_angle_bound_target_roundtrip_and_legality():
+    from qiskit.circuit.library import RZGate
+    from qiskit.transpiler import Target
+
+    from qtb.metrics import StructuralChecker
+
+    target = Target(num_qubits=1)
+    target.add_instruction(RZGate(Parameter("theta")), {(0,): None}, angle_bounds=[(-1, 1)])
+    data = export_target(target, [])
+    assert export_target(import_target(data), []) == data
+    circuit = QuantumCircuit(1)
+    circuit.rz(1.5, 0)
+    encoded = export_circuit(circuit)
+    checker = StructuralChecker(encoded["header"], data)
+    checker.consume(encoded["operations"][0])
+    assert checker.result()["status"] == "mismatch"

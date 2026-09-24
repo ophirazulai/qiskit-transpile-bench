@@ -91,8 +91,57 @@ def calibrate_cost(
         "replicates": replicates,
         "freeze_allowed": all(r["noise_panel"] <= math.log(1.05) for r in regimes.values()),
     }
+    result["null_rejections"] = null_cost_rejections(arms, result, replicates, rng_seed + 1)
+    rate = sum(result["null_rejections"]) / replicates
+    result["false_rejection_rate"] = rate
+    result["monte_carlo_SE"] = math.sqrt(rate * (1 - rate) / replicates)
     result["id"] = digest(result)
     return result
+
+
+def null_cost_rejections(arms, calibration, replicates=1000, rng_seed=20260925):
+    """Bootstrap the complete three-arm rule, including its one fresh rerun.
+
+    Cases share round draws within each arm. The two independently built
+    baseline series form the null distribution; the candidate is another
+    independent draw from the control series. Repeated trials retain all
+    within-round calls and all companion seeds.
+    """
+    estimator, weights = calibration["estimator"], calibration["weights"]
+    collected = COUNTS[estimator][2]
+    rng = random.Random(rng_seed)
+
+    def trial(regime):
+        threshold = calibration["regimes"][regime]
+        estimates = {}
+        for arm in ("baseline", "control", "evolved"):
+            indices = rng.choices(range(collected), k=threshold["count"])
+            source = arms["baseline" if arm == "baseline" else "control"]
+            estimates[arm] = {
+                case: cost_estimate(_resample(source[case], estimator, indices), estimator)
+                for case in weights
+            }
+
+        def breached(arm):
+            ratios = {c: estimates[arm][c] / estimates["baseline"][c] for c in weights}
+            panel = sum(w * math.log(ratios[c]) for c, w in weights.items())
+            return panel > threshold["noise_panel"] or any(
+                ratios[c] > 1.1
+                and estimates[arm][c] - estimates["baseline"][c] > threshold["floors"][c]
+                for c in weights
+            )
+
+        return breached("control"), breached("evolved")
+
+    rejected = []
+    for _ in range(replicates):
+        control, candidate = trial("normal")
+        failure = False
+        if candidate and not control:
+            control, candidate = trial("rerun")
+            failure = candidate and not control
+        rejected.append(failure)
+    return rejected
 
 
 def validate_bundle(bundle, calibration, run_id=None, historical=False):

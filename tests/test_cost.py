@@ -86,3 +86,42 @@ def test_identical_builds_cannot_coalesce_arms():
     bundle["arms"]["control"]["arm_id"] = "baseline"
     with pytest.raises(HarnessError):
         validate_bundle(bundle, calibration)
+
+
+def test_cost_null_calibration_applies_confirmed_rerun_rule():
+    arms = {a: {"case": [[100]] * 30} for a in ("baseline", "control")}
+    result = calibrate_cost(
+        arms, "timing", {"case": 1}, {}, datetime.now(UTC).isoformat(), replicates=100
+    )
+    assert result["false_rejection_rate"] == 0
+    assert result["null_rejections"] == [False] * 100
+
+
+def test_cost_replay_ignores_claimed_pass_without_fresh_rerun(tmp_path):
+    from qtb.canonical import digest, write_json
+    from qtb.coordinator.costs import replay_costs
+    from qtb.evaluator import record
+
+    normal, calibration = bundle_and_calibration()
+    case = {"case_id": "c", "panel": "timing"}
+    normal["case_hashes"] = {"c": digest(case)}
+    run = dict(
+        profile="iterations-profile",
+        run_id="run",
+        scope={},
+        calibrations={"cost": {"timing": calibration}},
+        builds={a: {"id": "identical"} for a in ("baseline", "control", "evolved")},
+    )
+    write_json(tmp_path / "cost/timing/normal.json", normal)
+    forged = [record("IA5/timing", "cost", "passed")]
+    result = replay_costs(tmp_path, run, {"cases": [case]}, forged)
+    assert result[0]["result"] == "unresolved"
+    rerun, _ = bundle_and_calibration(regime="rerun")
+    rerun.update(
+        calibration_id=calibration["id"], session_id="fresh", case_hashes=normal["case_hashes"]
+    )
+    for arm in rerun["arms"].values():
+        arm["session_id"] = "fresh"
+    write_json(tmp_path / "cost/timing/rerun.json", rerun)
+    result = replay_costs(tmp_path, run, {"cases": [case]}, forged)
+    assert result[0]["result"] == "failed"

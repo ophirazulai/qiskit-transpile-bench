@@ -69,19 +69,33 @@ def calibrate_quality(comparison, cases):
         for row in rows
         if row["revision"] == "baseline" and row["seed_block"] in {"KB1", "KB2"}
     ]
+    for case in cases:
+        for block in ("KB1", "KB2"):
+            selected = [
+                r
+                for r in rows
+                if r["case_id"] == case["case_id"]
+                and r["revision"] == "baseline"
+                and r["seed_block"] == block
+            ]
+            if len(selected) != case["seeds_per_block"] or any(
+                any(r.get(metric) is None for metric in ("D2", "N2"))
+                or not any(
+                    c["oracle"] == "C0" and c["status"] == "verified" for c in r.get("checks", [])
+                )
+                for r in selected
+            ):
+                raise Incomplete(f"Incomplete baseline calibration: {case['case_id']} / {block}")
     prerequisites = [
         record(id_, "completeness", "passed") for id_ in comparison.policy["quality_prerequisites"]
     ]
-    _, _, summaries = evaluate_quality(
+    records, _, summaries = evaluate_quality(
         comparison.manifest, comparison.policy, paired, prerequisites
     )
+    guard_ids = {r["id"] for r in records if r["kind"] == "guard"}
     guards = []
     for name, result in summaries.items():
-        if (
-            "deltas" not in result
-            or name.endswith("/improvement")
-            or name == "leave_iterations_out"
-        ):
+        if name not in guard_ids or "deltas" not in result:
             continue
         guard = {"id": name, "deltas": result["deltas"]}
         if "/cap/" in name:
@@ -92,7 +106,11 @@ def calibrate_quality(comparison, cases):
         guards.append(guard)
     if not guards:
         raise Incomplete("No complete baseline calibration panels")
-    result = sign_flip_calibration(guards, rng_seed=comparison.policy["rng_seed"])
+    result = sign_flip_calibration(
+        guards,
+        rng_seed=comparison.policy["rng_seed"],
+        multiplier=comparison.policy["guard_multiplier"],
+    )
     failures = []
     for case in cases:
         if case["role"] not in {"deterministic", "zero_baseline", "canary"}:
@@ -116,6 +134,8 @@ def preflight(comparison, cases, force=False):
     directory = comparison.root / "calibrations" / key
     summary_path = directory / "summary.json"
     summary = read_json(summary_path) if summary_path.exists() and not force else None
+    if summary and "false_rejection" not in summary:
+        summary = None
     if summary and datetime.now(UTC) > datetime.fromisoformat(summary["created_at"]) + timedelta(
         days=30
     ):
@@ -124,13 +144,29 @@ def preflight(comparison, cases, force=False):
         directory.mkdir(parents=True, exist_ok=True)
         for block in ("B0", "KB1", "KB2"):
             comparison.quality(cases, block=block, revisions=("baseline",))
+        comparison.audit(
+            cases,
+            read_records(comparison.directory / "observations.jsonl"),
+            revisions=("baseline",),
+        )
+        if not any(
+            r["id"] == "audit/determinism" and r["result"] == "passed" for r in comparison.records
+        ):
+            raise Incomplete("Baseline determinism audit failed before calibration")
         quality = calibrate_quality(comparison, cases)
         quality["role_failures"] = freeze_roles(comparison, cases)
         quality["freeze_allowed"] &= not quality["role_failures"]
         if quality["role_failures"]:
-            comparison.evidence(record("baseline/preflight", "correctness", "failed", "reference",
-                                       detail="Proposed deterministic or canary role failed the 300-seed audit",
-                                       cases=quality["role_failures"]))
+            comparison.evidence(
+                record(
+                    "baseline/preflight",
+                    "correctness",
+                    "failed",
+                    "reference",
+                    detail="Proposed deterministic or canary role failed the 300-seed audit",
+                    cases=quality["role_failures"],
+                )
+            )
         cost = {}
         for name, (panel, estimator) in cost_panels(comparison, all_panels=True).items():
             comparison.progress(f"Calibrating {name}: two independent baseline builds.")
@@ -150,14 +186,42 @@ def preflight(comparison, cases, force=False):
             "hashes": comparison.run["hashes"],
             "machine": comparison.run["machine"],
         }
+        rejections = [c["null_rejections"] for c in cost.values()]
+        cost_rate = (
+            sum(any(row) for row in zip(*rejections, strict=True)) / len(rejections[0])
+            if rejections
+            else 0.0
+        )
+        combined = 1 - (1 - quality["false_rejection_rate"]) * (1 - cost_rate)
+        summary["false_rejection"] = {
+            "quality": quality["false_rejection_rate"],
+            "cost": cost_rate,
+            "combined": combined,
+            "freeze_allowed": combined <= 0.1,
+            "noisy_guard_count": quality["noisy_guard_count"] + len(cost),
+            "method": "1 - (1 - p_quality) * (1 - p_cost); independent quality and cost sessions",
+        }
         write_json(summary_path, summary)
     comparison.run["calibrations"] = summary
     comparison.save()
+    if summary["quality"].get("role_failures"):
+        comparison.evidence(
+            record(
+                "baseline/preflight",
+                "correctness",
+                "failed",
+                "reference",
+                cases=summary["quality"]["role_failures"],
+                detail="Frozen baseline roles failed the 300-seed audit",
+            )
+        )
     comparison.evidence(
         record(
             "calibration/quality",
             "completeness",
-            "passed" if summary["quality"]["freeze_allowed"] else "unresolved",
+            "passed"
+            if summary["quality"]["freeze_allowed"] and summary["false_rejection"]["freeze_allowed"]
+            else "unresolved",
         )
     )
     comparison.evidence(
@@ -202,33 +266,56 @@ def freeze_roles(comparison, cases):
     from qtb.coordinator import structural_result
     from qtb.coordinator.storage import append_record
 
-    path = comparison.directory/'role-freeze.jsonl'
+    path = comparison.directory / "role-freeze.jsonl"
     saved = read_records(path)
-    known = {(r['case_id'],r['seed']): r for r in saved}
+    known = {(r["case_id"], r["seed"]): r for r in saved}
     failures = []
-    ordinary = read_records(comparison.directory/'observations.jsonl')
+    ordinary = read_records(comparison.directory / "observations.jsonl")
     for row in ordinary:
-        if row['revision'] == 'baseline' and 'D2' in row and 'N2' in row:
-            known.setdefault((row['case_id'],row['seed']),row)
+        if row["revision"] == "baseline" and "D2" in row and "N2" in row:
+            known.setdefault((row["case_id"], row["seed"]), row)
     for case in cases:
-        if case['role'] not in {'deterministic','zero_baseline','canary'}:
+        if case["role"] not in {"deterministic", "zero_baseline", "canary"}:
             continue
-        target=read_json(comparison.fixtures/case['target']['file'])
-        missing=[seed for seed in range(300) if (case['case_id'],seed) not in known]
-        for start in range(0,len(missing),25):
-            for result in comparison.job('baseline',case,'quality',missing[start:start+25]):
-                row={'case_id':case['case_id'],'seed':result['seed']}
-                if result['status']=='ok':
-                    row.update(structural_result(result['output'],target,result['layout'],case['logical_qubits']))
+        target = read_json(comparison.fixtures / case["target"]["file"])
+        missing = [seed for seed in range(300) if (case["case_id"], seed) not in known]
+        for start in range(0, len(missing), 25):
+            for result in comparison.job("baseline", case, "quality", missing[start : start + 25]):
+                row = {"case_id": case["case_id"], "seed": result["seed"]}
+                if result["status"] == "ok":
+                    row.update(
+                        structural_result(
+                            result["output"], target, result["layout"], case["logical_qubits"]
+                        )
+                    )
                 else:
-                    row['status']='mismatch'
-                append_record(path,row);known[case['case_id'],result['seed']]=row
-        values={(known.get((case['case_id'],s),{}).get('D2'),
-                 known.get((case['case_id'],s),{}).get('N2')) for s in range(300)}
-        if len(values)!=1 or (None,None) in values:
-            failures.append(case['case_id'])
-        if case['role']=='zero_baseline' and values!={(0,0)}:
-            failures.append(case['case_id'])
-        if case['role']=='canary' and values!={(case['expected']['D2'],case['expected']['N2'])}:
-            failures.append(case['case_id'])
+                    row["status"] = "mismatch"
+                append_record(path, row)
+                known[case["case_id"], result["seed"]] = row
+        values = {
+            (
+                known.get((case["case_id"], s), {}).get("D2"),
+                known.get((case["case_id"], s), {}).get("N2"),
+            )
+            for s in range(300)
+        }
+        if (
+            len(values) != 1
+            or (None, None) in values
+            or any(
+                known.get((case["case_id"], s), {}).get("status") == "mismatch"
+                or any(
+                    c.get("oracle") == "C0" and c.get("status") != "verified"
+                    for c in known.get((case["case_id"], s), {}).get("checks", [])
+                )
+                for s in range(300)
+            )
+        ):
+            failures.append(case["case_id"])
+        if case["role"] == "zero_baseline" and values != {(0, 0)}:
+            failures.append(case["case_id"])
+        if case["role"] == "canary" and values != {
+            (case["expected"]["D2"], case["expected"]["N2"])
+        }:
+            failures.append(case["case_id"])
     return sorted(set(failures))

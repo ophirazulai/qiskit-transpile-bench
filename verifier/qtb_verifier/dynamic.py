@@ -96,6 +96,13 @@ def simulate(circuit, max_steps=1000):
 
 
 def verify_dynamic(reference, output):
+    if (reference.num_qubits, reference.num_clbits) != (output.num_qubits, output.num_clbits):
+        return {
+            "status": "mismatch",
+            "oracle": "C3",
+            "input_domain": "all_zero",
+            "detail": "Quantum or classical output width changed",
+        }
     a, b = simulate(reference), simulate(output)
     distance = sum(
         np.abs(np.linalg.eigvalsh(a.get(key, 0) - b.get(key, 0))).sum() / 2

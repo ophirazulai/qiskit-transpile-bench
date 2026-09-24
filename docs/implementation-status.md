@@ -17,13 +17,20 @@ not measurements of an evolved Qiskit revision.
   confirm breadth, leave-iterations-out reporting, family cluster bootstrap, and sign-flip
   calibration. The verdict procedure preserves candidate-failure precedence.
 - Estimator-specific A/A cost calibration, fresh three-arm sessions, independent arm IDs,
-  separately calibrated doubled-count reruns, calibration expiry, and archived bundles.
+  separately calibrated doubled-count reruns, calibration expiry, archived bundles, and
+  combined quality/cost false-rejection calibration.
 - Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable run
-  evidence, content-addressed quality cache, determinism audits, reporting, review and repro.
+  evidence, wheel and quality caches, determinism audits, report replay from raw quality/cost
+  observations, and reproducers using archived wheels and dependency locks.
 - Trusted dense, statevector, terminal-measurement, dynamic-branching, Clifford, and schedule
-  oracles; a frozen 480-configuration C1–C5 fixture suite; worker API contract observations.
+  oracles; a frozen 480-configuration C1–C5 fixture suite; coherent-control phase checks;
+  worker API contracts and negative configuration checks.
 - Curated iterations and confirm workloads, frozen semantic references for Trotter inputs,
   Clifford variants, explicit license/provenance records, and reproducible curation tools.
+- All-300-seed baseline role audits, C1-lite eligibility based on the reference/output union,
+  upstream seed-reshuffle exclusion proposals, and binding baseline-owned test execution.
+- One-pass structural metrics/hash/legality, successful-output pruning above 8 MB,
+  runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
 
 ## Qualification work that requires a runner and review
@@ -50,22 +57,19 @@ not measurements of an evolved Qiskit revision.
 - The full controlled-runner qualification and manual evidence inspection have not been
   performed by this implementation task. Neither profile should be presented as qualified.
 - The adapter intentionally refuses unknown operations and unsupported expression/control-flow
-  forms. It does not silently decompose a high-level input to make a revision compatible.
-  Target angle-bound export is currently unsupported; the shipped targets have no bounds.
-- The automatically generated behavioral suite covers the implemented oracle paths; a
-  complete upstream exclusion derivation, coherent-control phase checks, and every negative
-  API configuration from the design still need qualification expansion.
-- Quality execution is serial in the coordinator, with seeds batched for compilation but
-  routing prefixes launched separately. It preserves the serial reference contract, but
-  does not yet meet the plan's concurrent-runner wall-time estimates.
-- Full C1-lite invocation currently selects the small-band scored cases. Extending eligibility
-  to every case satisfying the union-width rule is required before confirm qualification.
-- Full output retention is conservative: outputs are kept for inspection. The 8 MB pruning
-  policy is not yet applied. Build reuse across separate comparisons is not implemented;
-  quality evidence remains content-addressed and reusable when build identities match.
-- The cost estimators and sign-flip calibrator have independent tests. Combined family-wise
-  quality/cost rejection calibration and all 300-seed role-freeze checks require completion
-  before freezing a profile. The qualification gate prevents acceptance without that work.
+  forms. It does not silently decompose high-level inputs to make a revision compatible.
+  Angle-bound targets use an explicit, checked Qiskit state adapter because 2.5.2 has no
+  public getter for the numeric bounds.
+- Quality orchestration is serial, with quality and routing prefixes batched by seed.
+  Runtime and memory budgets still need measurement on the intended controlled runner.
+- Automatic pruning keeps failing and inconclusive runs intact for investigation. Successful
+  large outputs are pruned with a hash/observation retention record; reproducers recompile
+  their recorded seed from the archived wheels.
+- The upstream exclusion command produces proposals, not approved exclusions. The candidate's
+  own Python tests are report-only, while the baseline's tests bind the comparison.
+- CI currently verifies the adapter on Qiskit 2.5.2. The trusted verifier stays pinned to that
+  version. Additional source revisions must complete round trips and the correctness suite
+  before they can participate in a qualified comparison.
 
 ## Fixture substitutions
 

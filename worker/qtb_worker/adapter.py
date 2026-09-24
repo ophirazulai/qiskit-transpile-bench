@@ -81,7 +81,9 @@ def decode_value(value, parameters):
             return math.pi
         values = [tree(arg) for arg in args]
         if op == "add":
-            return sum(values)
+            rational = sum((v for v in values if isinstance(v, Fraction)), Fraction())
+            result = sum(v for v in values if not isinstance(v, Fraction))
+            return (result * rational.denominator + rational.numerator) / rational.denominator
         if op == "mul":
             result = 1
             rational = Fraction(1)
@@ -484,7 +486,18 @@ def export_target(target, native_2q_names):
         if fixed:
             spec["fixed_parameters"] = fixed
         if target.gate_has_angle_bounds(name):
-            raise Unsupported("This adapter cannot faithfully export angle-bound targets")
+            # Qiskit 2.5 has public bound validation but no public bound getter.
+            # This version adapter reads only the numeric field of its state;
+            # an unknown state layout is refused, never inferred by probing.
+            try:
+                bounds = target.__getstate__()["base"]["gate_map"][name]["angle_bounds"]
+                if len(bounds) != len(op.params):
+                    raise ValueError("Wrong angle-bound arity")
+                spec["angle_bounds"] = [
+                    None if pair is None else [number(x) for x in pair] for pair in bounds
+                ]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise Unsupported("Unknown target angle-bound representation") from exc
         instructions.append(spec)
     result = {
         "format": TARGET_FORMAT,

@@ -128,7 +128,14 @@ def snapshot(source, destination):
     else:
         names = []
         for root, dirs, files in os.walk(source):
-            dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not d.endswith(".egg-info"))
+            # Build directories are excluded only at the project root: Qiskit
+            # also has real source packages named crates/transpiler/src/target.
+            dirs[:] = sorted(
+                d
+                for d in dirs
+                if d not in {".git", "__pycache__"}
+                and not (Path(root) == source and (d in EXCLUDED or d.endswith(".egg-info")))
+            )
             names.extend(str((Path(root) / f).relative_to(source)) for f in sorted(files))
         commit, dirty = None, None
     destination.mkdir(parents=True, exist_ok=False)
@@ -137,7 +144,9 @@ def snapshot(source, destination):
         relative = Path(name)
         if relative.is_absolute() or ".." in relative.parts:
             raise HarnessError("Unsafe snapshot path")
-        if any(part in EXCLUDED or part.endswith(".egg-info") for part in relative.parts):
+        # Git already filters ignored, untracked build products. Never discard
+        # tracked source because a path component happens to be called target.
+        if ".git" in relative.parts:
             continue
         original = source / name
         if not original.exists() and not original.is_symlink():
@@ -205,7 +214,15 @@ def baseline_toolchain(snapshot_info):
     return tomllib.loads(path.read_text())["toolchain"]["channel"]
 
 
-def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
+def build_revision(
+    snapshot_info,
+    destination,
+    locks,
+    harness_wheel,
+    toolchain,
+    cache_root=None,
+    cache_slot="baseline",
+):
     destination, locks = Path(destination).resolve(), Path(locks).resolve()
     destination.mkdir(parents=True, exist_ok=False)
     log = destination / "build.log"
@@ -227,6 +244,24 @@ def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
     tool = subprocess.run(["rustc", "-Vv"], env=env, capture_output=True, text=True, check=False)
     if tool.returncode:
         raise HarnessError(f"Cannot resolve baseline toolchain {toolchain}: {tool.stderr}")
+    compilers = {}
+    for compiler in ("cc", "c++"):
+        version = subprocess.run(
+            [compiler, "--version"], env=env, capture_output=True, text=True, check=False
+        )
+        if version.returncode:
+            raise HarnessError(f"Cannot resolve native compiler {compiler}")
+        compilers[compiler] = version.stdout
+    identity = {
+        "snapshot": snapshot_info["tree_hash"],
+        "python": sys.version,
+        "locks": {p.name: file_hash(p) for p in locks.iterdir() if p.is_file()},
+        "toolchain": tool.stdout,
+        "native_compilers": compilers,
+        "flags": {k: env[k] for k in ("QISKIT_BUILD_PROFILE", "QISKIT_BUILD_WITH_MIMALLOC")},
+        "os": platform.system(),
+        "architecture": platform.machine(),
+    }
     run_logged([sys.executable, "-m", "venv", envdir], destination, env, log)
     python = envdir / "bin/python"
     run_logged(
@@ -239,6 +274,8 @@ def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
             locks / "common.lock",
             "-r",
             locks / "build-constraints.txt",
+            "-r",
+            locks / "dev-tests.lock",
         ],
         destination,
         env,
@@ -248,27 +285,46 @@ def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
     before = file_hash(cargo_lock)
     wheel_dir = destination / "wheels"
     wheel_dir.mkdir()
-    run_logged(
-        [
-            python,
-            "-m",
-            "pip",
-            "wheel",
-            "--no-deps",
-            "--no-build-isolation",
-            "-w",
-            wheel_dir,
-            source,
-        ],
-        destination,
-        env,
-        log,
-    )
+    cache = Path(cache_root) / cache_slot / digest(identity) if cache_root else None
+    cache_hit = False
+    if cache and (cache / "wheel.json").exists():
+        cached = read_json(cache / "wheel.json")
+        wheel = cache / cached["name"]
+        if cached["identity"] == identity and file_hash(wheel) == cached["sha256"]:
+            shutil.copy2(wheel, wheel_dir / wheel.name)
+            cache_hit = True
+    if not cache_hit:
+        run_logged(
+            [
+                python,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "--no-build-isolation",
+                "-w",
+                wheel_dir,
+                source,
+            ],
+            destination,
+            env,
+            log,
+        )
     if file_hash(cargo_lock) != before:
         raise HarnessError("Qiskit build modified Cargo.lock")
     wheels = list(wheel_dir.glob("qiskit-*.whl"))
     if len(wheels) != 1:
         raise HarnessError("Build did not produce exactly one Qiskit wheel")
+    if cache and not cache_hit:
+        from qtb.canonical import atomic_bytes
+        from qtb.coordinator.storage import locked
+
+        with locked(cache / "cache.lock"):
+            atomic_bytes(cache / wheels[0].name, wheels[0].read_bytes())
+            write_json(
+                cache / "wheel.json",
+                {"identity": identity, "name": wheels[0].name, "sha256": file_hash(wheels[0])},
+            )
     run_logged(
         [python, "-m", "pip", "install", "--no-deps", wheels[0], harness_wheel],
         destination,
@@ -298,15 +354,6 @@ def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
         if not Path(provenance[key]).resolve().is_relative_to(envdir):
             raise HarnessError("Import provenance escaped isolated environment")
     provenance["native_sha256"] = file_hash(provenance["native_file"])
-    identity = {
-        "snapshot": snapshot_info["tree_hash"],
-        "python": sys.version,
-        "locks": {p.name: file_hash(p) for p in locks.iterdir() if p.is_file()},
-        "toolchain": tool.stdout,
-        "flags": {k: env[k] for k in ("QISKIT_BUILD_PROFILE", "QISKIT_BUILD_WITH_MIMALLOC")},
-        "os": platform.system(),
-        "architecture": platform.machine(),
-    }
     freeze = subprocess.run(
         [python, "-m", "pip", "freeze", "--all"],
         cwd=destination,
@@ -317,6 +364,7 @@ def build_revision(snapshot_info, destination, locks, harness_wheel, toolchain):
     ).stdout
     result = {
         "id": digest(identity),
+        "wheel_cache_hit": cache_hit,
         "toolchain_channel": toolchain,
         "identity": identity,
         "python": str(python),

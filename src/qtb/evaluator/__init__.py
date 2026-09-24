@@ -137,6 +137,8 @@ def evaluate_quality(manifest, policy, rows, evidence=()):
             id_ = f"{prefix}4/cap/{case['case_id']}/{metric}"
             required.add(id_)
             try:
+                if not panel_valid:
+                    raise Incomplete("Round-trip or determinism audit evidence is missing")
                 result = paired_panel(
                     [case],
                     observations,
@@ -166,6 +168,8 @@ def evaluate_quality(manifest, policy, rows, evidence=()):
         required.add(id_)
         status, detail = "passed", ""
         try:
+            if not panel_valid:
+                raise Incomplete("Round-trip or determinism audit evidence is missing")
             for seed in range(case["seeds_per_block"]):
                 for metric in ("D2", "N2"):
                     a = observations[case["case_id"], "baseline", seed][metric]
@@ -196,10 +200,14 @@ def evaluate_quality(manifest, policy, rows, evidence=()):
                                 value=a,
                             )
                         )
-        except KeyError:
+        except (KeyError, Incomplete) as exc:
             if status != "failed":
                 status = "unresolved"
-            detail = "Missing exact-guard observation or frozen expected value"
+            detail = (
+                str(exc)
+                if isinstance(exc, Incomplete)
+                else "Missing exact-guard observation or frozen expected value"
+            )
         records.append(record(id_, "guard", status, detail=detail))
     if confirm and objective:
         family_scores = []

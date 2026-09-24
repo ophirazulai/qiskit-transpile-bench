@@ -12,7 +12,6 @@ import importlib.util
 import json
 import random
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -73,14 +72,7 @@ def load_probe(source):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.QASM = str(source / "test/benchmarks/qasm")
-    # Qiskit was imported before exposing upstream benchmark constructor modules.
-    sys.path.insert(0, str(source))
-    import types
-
-    package = types.ModuleType("test")
-    package.__path__ = [str(source / "test")]
-    sys.modules["test"] = package
+    module.configure_source(str(source))
     return module
 
 
