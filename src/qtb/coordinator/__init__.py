@@ -225,7 +225,9 @@ class Comparison:
                     directory.rename(
                         directory.with_name(directory.name + ".failed-" + uuid.uuid4().hex[:8])
                     )
-                self.progress(f"Building {revision} with baseline Rust toolchain {toolchain}.")
+                self.progress(
+                    f"Preparing {revision} environment with baseline Rust toolchain {toolchain}."
+                )
                 build = build_revision(
                     snapshots["baseline" if revision == "control" else revision],
                     directory,
@@ -234,6 +236,7 @@ class Comparison:
                     toolchain,
                     cache_root=self.root / "build-cache",
                     cache_slot=revision,
+                    progress=self.progress,
                 )
             self.run["builds"][revision] = build
             self.save()

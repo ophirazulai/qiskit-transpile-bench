@@ -149,7 +149,7 @@ From the design probe on an Apple M1 Max, serial:
 | Quality compiles | About 15,000 compiles and 87 CPU-minutes per revision; routing replay roughly doubles this |
 | C1-lite | Provisional; one 23-qubit `ripple_adder_10` check took about 4 minutes in validation |
 | One decision, baseline cached | About 3.5 CPU-hours of quality work for the candidate; twice that the first time a baseline is used |
-| Cost panels | Typically about 1 h on an exclusive machine when the screens are clear (confirm timing about 30 min, T1–T19 about 15 min, memory about 15 min); up to about 2.5 h with full 10-round counts and reruns. The `cx`/`ecr` twins add about 10 min when timed, the companion about 20 min. Design estimates, not measured runs |
+| Cost panels | A timing round (36 cases across the `timing`, `preset` and `confirm-timing` panels, one process per arm) is about 5 min on an exclusive machine. Typical: the 4-round screens (about 20 min) plus memory (135 processes, about 15 min), about 35–40 min. Worst: screen + full + rerun = 4 + 10 + 20 = 34 rounds, about 3 h, plus a doubled memory rerun. The `cx`/`ecr` twins add about 10 min when timed, the companion about 10–20 min. Design estimates, not measured runs |
 
 Quality is currently orchestrated serially. Plan for a long first run, and see
 [environments.md](environments.md) for build time.

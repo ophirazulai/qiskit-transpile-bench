@@ -229,6 +229,7 @@ def build_revision(
     toolchain,
     cache_root=None,
     cache_slot="baseline",
+    progress=None,
 ):
     destination, locks = Path(destination).resolve(), Path(locks).resolve()
     destination.mkdir(parents=True, exist_ok=False)
@@ -306,6 +307,11 @@ def build_revision(
         if cached["identity"] == identity and file_hash(wheel) == cached["sha256"]:
             shutil.copy2(wheel, wheel_dir / wheel.name)
             cache_hit = True
+    if progress is not None:
+        if cache_hit:
+            progress(f"Reusing cached {cache_slot} Qiskit wheel; skipping the Rust compile.")
+        else:
+            progress(f"No cached {cache_slot} Qiskit wheel; compiling Qiskit from source.")
     if not cache_hit:
         run_logged(
             [

@@ -147,10 +147,11 @@ this loop never sees.
 ## Budget
 
 On the development machine (serial, Apple M1 Max): about 10 CPU-minutes of quality compiles
-per revision, roughly doubled by routing replay. The cost panels take about 10–15 minutes on
-an exclusive machine when the screen is clear (16 cases × 4 rounds × 3 arms, in 12 processes),
-up to about 40 minutes with the full count and a rerun, plus about 20 minutes for the
-companion when required. These are design estimates, not measured runs. The first run against
+per revision, roughly doubled by routing replay. A cost round (16 cases in one process per
+arm, 3 arms) takes about 2–2.5 minutes on an exclusive machine, so a clear 4-round screen is
+about 10 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about
+50 minutes, plus about 10–20 minutes for the companion when required. These are design
+estimates, not measured runs. The first run against
 a baseline also pays for calibration (three seed blocks of baseline quality, a 300-seed role
 audit, and 30 A/A rounds of every cost panel from two baseline builds, about an hour). Later
 runs reuse it for 30 days. Building the Qiskit environments dominates the first run; see

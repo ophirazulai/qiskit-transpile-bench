@@ -155,9 +155,9 @@ for details.
 | Whole `smoke` run, first time | About 1 h 20 min, almost all of it building |
 | Iterations quality compiles | About 10 CPU-minutes per revision, roughly doubled by routing replay |
 | Confirm quality compiles | About 3.5 CPU-hours for the candidate once the baseline is cached |
-| Cost panels, iterations | Typically 10–15 min; up to about 40 min when a candidate sits near the noise band and needs the full count and a rerun. Add roughly 20 min for the multi-seed companion when the change touches layout or routing |
-| Cost panels, confirm | Typically 1 h; up to about 2.5 h with full counts and reruns |
-| First `compare` against a new baseline | Also pays for calibration (30 A/A rounds of every cost panel, about 1 h for iterations and 2.5 h for confirm) and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days |
+| Cost panels, iterations | One round (3 arms × 16 cases) is about 2–2.5 min. Typical: the 4-round screen, about 10 min. Worst: screen + 6-round full measurement + 12-round rerun = 22 rounds, about 50 min. Add about 10–20 min for the multi-seed companion when the change touches layout or routing |
+| Cost panels, confirm | One round (3 arms × 36 cases) is about 5 min. Typical: the 4-round screen (about 20 min) plus memory (about 15 min), about 35–40 min. Worst: screen + 10-round full + 20-round rerun = 34 rounds, about 3 h, plus a memory rerun |
+| First `compare` against a new baseline | Also pays for calibration and upstream tests (budgets of 4 h Python and 3 h Rust); calibration is reused for 30 days. Calibration compiles the baseline on two extra seed blocks (about 25 CPU-min for iterations, about 3 CPU-h for confirm) and times baseline against control for 30 rounds on every cost panel: about 1 h for the batched timing panels, plus the multi-seed companion at 30 rounds per seed (about 2–6 h for iterations, more for confirm), which dominates |
 
 Cost panels are estimates from the design probes, not measured runs: no full comparison with
 cost measurement has been recorded yet. They run only after the quality test has passed, on an
