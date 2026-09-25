@@ -151,7 +151,8 @@ From the design probe on an Apple M1 Max, serial:
 | One decision, baseline cached | About 3.5 CPU-hours of quality work for the candidate; twice that the first time a baseline is used |
 | Cost panels | A timing round (36 cases across the `timing`, `preset` and `confirm-timing` panels, one process per arm) is about 5 min on an exclusive machine. Typical: the 4-round screens (about 20 min) plus memory (135 processes, about 15 min), about 35–40 min. Worst: screen + full + rerun = 4 + 10 + 20 = 34 rounds, about 3 h, plus a doubled memory rerun. The `cx`/`ecr` twins add about 10 min when timed, the companion about 10–20 min. Design estimates, not measured runs |
 
-Quality is currently orchestrated serially. Plan for a long first run, and see
+Quality runs up to 9 seed batches at once; the C0/C6 checks in the coordinator remain
+serial under the GIL. Plan for a long first run, and see
 [environments.md](environments.md) for build time.
 
 ## Declared coverage gaps

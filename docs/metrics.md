@@ -183,7 +183,10 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   `passed_on_rerun`.
 
 Cost is measured only when the improvement test passed and nothing has failed, because it
-needs an exclusive machine and hours of wall time.
+needs an exclusive machine and hours of wall time. The exception is an A/A run (both builds
+have the same ID): it never improves, but its cost panels are the known-outcome check that
+timing and memory report no change, so they are measured unless a correctness or guard check
+failed.
 
 ## 7. Change scope and stage coverage
 

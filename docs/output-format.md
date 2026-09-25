@@ -44,7 +44,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `evidence.json` | Coordinator | Every constraint record gathered so far: round-trip, preflight, correctness, audit, cost |
 | `observations.jsonl` | Coordinator | One line per quality compile (see below) |
 | `correctness.jsonl` | `compare` | Every C0–C5 check from the correctness suite |
-| `clifford.jsonl` | `compare` | C7 results for full and prefix pipelines |
+| `clifford.jsonl` | `compare` | C7 results: prefix pipeline, plus the full pipeline in the confirm profile |
 | `changed-tests.json` | `compare` | Test files and Rust sources that the evolved tree changed |
 | `upstream-baseline/`, `upstream-evolved/` | `compare` | Upstream pytest records (`tests.jsonl`), logs and `rust.log` |
 | `upstream-evolved-own.json` | `compare` | Report-only run of the candidate's own Python tests |
@@ -57,6 +57,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `oracle-jobs/batch-<uuid>/` | Verifier | `batch.json` (the jobs one verifier process ran, in order) and its `verifier.log` |
 | `decision.json` | Reporter | Machine-readable verdict (`compare` only) |
 | `report.md` | Reporter | Human-readable verdict (`compare` only) |
+| `progress.log` | Coordinator | Timestamped progress (wall clock and elapsed time), a start/end line with the duration of every stage and sub-step, one line per quality batch (compile, routing-prefix, check and verify times), and a table of step durations at the end. A resumed run appends to it |
 | `smoke.json` | `smoke` | Smoke result; no decision is written |
 | `retention.json` | Coordinator | Large successful outputs that were deleted, with their hashes |
 | `reevaluations/<timestamp>/` | `evaluate --run` | A recomputed `decision.json` and `report.md`; the original is never changed |

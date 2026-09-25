@@ -172,12 +172,15 @@ compile cost of a quality run.
 Each 100-qubit scored circuit has a frozen **Clifford variant**: every rotation angle is
 replaced by a random odd multiple of π/2, which keeps the routing problem. Clifford circuits
 can be compared exactly at any width through their stabilizer tableaux. Each revision compiles
-the variant in two ways, on 3 seeds in the iterations profile and 10 in the confirm profile.
+the variant on 3 seeds in the iterations profile and 10 in the confirm profile: in the prefix
+mode below, and in the confirm profile also through the full pipeline.
 C6 already replays layout and routing on every scored seed, so C7's own contribution is
 translation (and optimization, in full mode) at full width, which does not need many seeds:
 
-- **Full pipeline:** covers all stages when it verifies. At levels 2–3, two-qubit
-  resynthesis usually emits non-Clifford angles, so the result is often `unverified`.
+- **Full pipeline (confirm profile only):** covers all stages when it verifies. At levels 2–3,
+  two-qubit resynthesis usually emits non-Clifford angles, so the result is often
+  `unverified` (8 of 9 scored variants in the 2026-09-25 A/A run). The iterations profile
+  skips it: `IA1/C7` never counted it, and it cost about 4 minutes per run.
 - **Prefix:** optimization stage dropped, with `unitary_synthesis_method=clifford`. Covers
   init, layout, routing and translation, with unitary synthesis recorded as **substituted**.
   This is the variant `IA1/C7` requires.

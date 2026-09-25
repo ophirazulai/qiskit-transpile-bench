@@ -2,6 +2,7 @@
 
 import os
 import random
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 from qtb.canonical import digest, read_json, write_json
 from qtb.config import STAGES
 from qtb.coordinator.process import run_worker
+from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import locked, runner_lock
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator import record
@@ -113,6 +115,15 @@ def _too_busy():
     return os.getloadavg()[0] > max(1.0, (os.cpu_count() or 1) * 0.5)
 
 
+def _wait_until_quiet(timeout_s=300, poll_s=10):
+    """Let the one-minute load average decay after the concurrent correctness stages."""
+    deadline = time.monotonic() + timeout_s
+    while _too_busy():
+        if time.monotonic() >= deadline:
+            raise Incomplete("Machine is too busy for cost measurement")
+        time.sleep(poll_s)
+
+
 def timing_batch_job(cases, fixture_root, measurement_protocol):
     """One fresh process times every case of a panel, in manifest order.
 
@@ -170,8 +181,7 @@ def collect_panel(
         return by_seed
 
     with locked(runner_lock()):
-        if _too_busy():
-            raise Incomplete("Machine is too busy for cost measurement")
+        _wait_until_quiet()
         for round_ in range(count):
             if estimator == "timing":
                 # A timing round is one fresh process per arm running the whole
@@ -309,16 +319,17 @@ def measure_costs(comparison):
     for name, (cases, estimator) in cost_panels(comparison).items():
         comparison.progress(f"Measuring {name}: fresh interleaved baseline/evolved arms.")
         try:
-            result = measure_panel(
-                comparison.run,
-                comparison.run["builds"],
-                cases,
-                estimator,
-                comparison.directory / "cost" / name,
-                comparison.fixtures,
-                comparison.policy,
-                guarded=name in guarded,
-            )
+            with step(comparison, f"cost panel {name}"):
+                result = measure_panel(
+                    comparison.run,
+                    comparison.run["builds"],
+                    cases,
+                    estimator,
+                    comparison.directory / "cost" / name,
+                    comparison.fixtures,
+                    comparison.policy,
+                    guarded=name in guarded,
+                )
         except Incomplete as exc:
             if name in guarded:
                 raise

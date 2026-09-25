@@ -7,6 +7,7 @@ that reproduce an output already verified cost nothing.
 
 from qtb.canonical import read_circuit, read_json
 from qtb.config import STAGES
+from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import append_record
 from qtb.evaluator import record
 
@@ -14,6 +15,10 @@ from qtb.evaluator import record
 # translation (and, in full mode, optimization) at full width, which a few seeds exercise as
 # well as ten. Acceptance keeps the wider sample.
 CLIFFORD_SEEDS = {"IA": 3, "CA": 10}
+# Full-pipeline C7 runs only in the confirm profile. At levels 2-3, two-qubit resynthesis
+# emits non-Clifford rotation angles, so full outputs rarely verify, and IA1/C7 counts only
+# the prefix. The iterations profile therefore does not pay for full compiles.
+CLIFFORD_FULL_MODE = {"IA": False, "CA": True}
 
 
 def _api_ok(result):
@@ -83,22 +88,25 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
         comparison.progress(
             f"{revision}: frozen C1–C5 regression suite ({len(cases)} configurations)."
         )
-        compiled = comparison.jobs(
-            (revision, case, "quality", range(case["seeds_per_block"])) for case in cases
-        )
+        with step(comparison, f"compile {len(cases)} configurations"):
+            compiled = comparison.jobs(
+                (revision, case, "quality", range(case["seeds_per_block"])) for case in cases
+            )
         # API contract checks run independently of metric/oracle grading.
         api_cases = [
             case
             for case in cases
             if case["optimization_level"] == 2 and case["options"]["initial_layout"] is None
         ]
-        api = comparison.jobs((revision, case, "api_checks", [0]) for case in api_cases)
+        with step(comparison, f"API contract checks ({len(api_cases)})"):
+            api = comparison.jobs((revision, case, "api_checks", [0]) for case in api_cases)
         requests, plans = [], []
         for case, results in zip(cases, compiled, strict=True):
             for result in results:
                 plans.append((case, result, _plan(comparison, case, result, requests)))
         comparison.progress(f"{revision}: verifying {len(requests)} oracle requests.")
-        verdicts = comparison.verify_many(requests)
+        with step(comparison, f"verify {len(requests)} oracle requests"):
+            verdicts = comparison.verify_many(requests)
         statuses = []
         for case, result, checks in plans:
             for check in checks:
@@ -160,6 +168,8 @@ def clifford_checks(comparison, cases):
             ["unitary_synthesis"],
         ),
     )
+    if not CLIFFORD_FULL_MODE[comparison.prefix]:
+        modes = tuple(mode for mode in modes if mode[0] != "full")
     specs, labels = [], []
     for revision in ("baseline", "evolved"):
         for case in cases:
@@ -174,7 +184,8 @@ def clifford_checks(comparison, cases):
             for mode, edits, covers, substituted in modes:
                 specs.append((revision, variant, "prefix", seeds, edits))
                 labels.append((revision, case, variant, mode, covers, substituted))
-    outputs = comparison.jobs(specs)
+    with step(comparison, f"compile {len(specs)} Clifford variant jobs"):
+        outputs = comparison.jobs(specs)
     requests, planned = [], []
     for (revision, case, variant, mode, covers, substituted), rows in zip(
         labels, outputs, strict=True
@@ -194,7 +205,8 @@ def clifford_checks(comparison, cases):
             else:
                 check = {"status": "unverified", "detail": output.get("error")}
             planned.append((revision, case, mode, output, check))
-    verdicts = comparison.verify_many(requests)
+    with step(comparison, f"verify {len(requests)} Clifford outputs"):
+        verdicts = comparison.verify_many(requests)
     checks = []
     for revision, case, mode, output, check in planned:
         if isinstance(check, int):

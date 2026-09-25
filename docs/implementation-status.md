@@ -84,7 +84,9 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
   forms. It does not silently decompose high-level inputs to make a revision compatible.
   Angle-bound targets use an explicit, checked Qiskit state adapter because 2.5.2 has no
   public getter for the numeric bounds.
-- Quality orchestration is serial, with quality and routing prefixes batched by seed.
+- Quality orchestration runs up to 9 seed batches at once (each batch is one quality job and
+  its two routing prefixes). Input roundtrip and the determinism audit also run concurrently.
+  The C0/C6 checks of each batch run in the coordinator process and are bound by the GIL.
   Runtime and memory budgets still need measurement on the intended controlled runner.
 - Automatic pruning keeps failing and inconclusive runs intact for investigation. Successful
   large outputs are pruned with a hash/observation retention record. Pinned dependency

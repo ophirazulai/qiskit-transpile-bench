@@ -130,10 +130,15 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
 6. **Quality:** every non-timing case of the profile, for both revisions, on seed block B0.
    Each output gets C0 (structure) and, where applicable, C6 (routing replay) and C1-lite
    (confirm profile). Baseline observations come from the quality cache when possible.
+   Up to 9 seed batches compile at once (quality metrics are deterministic and these compile
+   times are never read); results are committed in plan order.
 7. **Determinism audit.** At least 5% (minimum 10) of observations are recompiled, half of
-   them with a different `PYTHONHASHSEED`, and must reproduce identical outputs.
+   them with a different `PYTHONHASHSEED`, and must reproduce identical outputs. The
+   recompiles run concurrently.
 8. **Cost:** timing and memory panels, measured only if the improvement test passed and
-   nothing has failed. The two arms (baseline, evolved) are interleaved in random
+   nothing has failed, or for an A/A run (identical build IDs) unless a correctness or guard
+   check failed. Measurement waits up to 5 minutes for the load average to settle after the
+   concurrent stages. The two arms (baseline, evolved) are interleaved in random
    order, each round in a fresh process per arm. A short screen ends a clearly clean panel
    early; otherwise the panel is measured in full and, on a candidate-only breach, rerun once.
 9. **Decision.** The evaluator combines all records into a verdict. The reporter writes

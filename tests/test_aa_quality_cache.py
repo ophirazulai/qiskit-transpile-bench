@@ -83,7 +83,8 @@ def test_identical_builds_compile_both_arms_despite_existing_quality_cache(tmp_p
     )
 
     rows = comparison.quality([case])
-    assert calls == [
+    # Batches compile concurrently; only the committed rows keep plan order.
+    assert sorted(calls) == [
         ("baseline", (0, 1)),
         ("baseline", (2,)),
         ("evolved", (0, 1)),

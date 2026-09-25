@@ -160,8 +160,10 @@ for details.
 | Upstream tests (confirm only) | Three Python runs of about 3–4 min each, plus Rust tests for both builds (budgets of 4 h Python and 3 h Rust). There is no calibration step: the cost thresholds are fixed in `policy.json`, and the baseline's quality compiles are cached for later runs |
 
 Cost panels are estimates from the design probes, not measured runs: no full comparison with
-cost measurement has been recorded yet. They run only after the quality test has passed, on an
-otherwise idle machine.
+cost measurement has been recorded yet. They run only after the quality test has passed (or,
+for an A/A run with identical builds, whenever no correctness or guard check failed), on an
+otherwise idle machine. Every run writes `progress.log` next to `report.md` with the wall time
+of each stage.
 
 **Why the cost panels are this fast.** Each panel starts with a 4-round *screen*. If the
 candidate's compile time already sits inside the noise band of the full measurement (and no
