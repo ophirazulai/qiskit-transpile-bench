@@ -1,4 +1,8 @@
-"""Pinned oracle subprocess. Inputs and outputs are files, never live objects."""
+"""Pinned oracle subprocess. Inputs and outputs are files, never live objects.
+
+One process can verify a batch of jobs (``--batch``): Qiskit is imported once, and each job
+still reads its own ``job.json`` and writes its own ``result.json``.
+"""
 
 import argparse
 
@@ -13,12 +17,24 @@ from qtb_verifier.small_exact import verify_clifford, verify_unitary
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--job", required=True)
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--job")
+    parser.add_argument("--out")
+    parser.add_argument("--batch", help="JSON list of {job, out} pairs, verified in order")
     args = parser.parse_args()
     if qiskit.__version__ != "2.5.2":
         raise HarnessError("Verifier must run the independently pinned Qiskit 2.5.2")
-    job = read_json(args.job)
+    if args.batch:
+        pairs = read_json(args.batch)
+    elif args.job and args.out:
+        pairs = [{"job": args.job, "out": args.out}]
+    else:
+        parser.error("Pass --job and --out, or --batch")
+    for pair in pairs:
+        run_job(pair["job"], pair["out"])
+
+
+def run_job(job_path, out_path):
+    job = read_json(job_path)
     if job["protocol"] != "qtb-verifier/1":
         raise HarnessError("Unknown verifier protocol")
 
@@ -76,7 +92,7 @@ def main():
     except Exception as exc:
         result = {"status": "unverified", "detail": f"{type(exc).__name__}: {exc}"}
     result.update(protocol="qtb-verifier/1", reference_hash=job["reference_hash"])
-    write_json(args.out, result)
+    write_json(out_path, result)
 
 
 if __name__ == "__main__":

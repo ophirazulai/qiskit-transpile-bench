@@ -116,7 +116,7 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 
 | Rule | Constraint record IDs | Requirement |
 | --- | --- | --- |
-| IA1 correctness | `IA1/C0`, `IA1/C1-C5`, `IA1/C6`, `IA1/C7`, `IA1/upstream`, `IA1/stage-coverage` | Every output is legal (C0). The C1–C5 suite passes for both revisions. Routing replay verifies every scored and basis-guard output. Clifford variants verify. The baseline's upstream Python tests and the Rust tests show no new failures. Every changed stage is covered by a verified check |
+| IA1 correctness | `IA1/C0`, `IA1/C1-C5`, `IA1/C6`, `IA1/C7`, `IA1/stage-coverage` | Every output is legal (C0). The C1–C5 suite passes for both revisions. Routing replay verifies every scored and basis-guard output. Clifford variants verify on 3 seeds. Every changed stage is covered by a verified check. Upstream tests run only in the confirm profile |
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
@@ -127,8 +127,8 @@ Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight
 `audit/determinism`.
 
 Policy values (`policy.json`): improvement multiplier 2.0, guard multiplier 3.0, practical
-ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924,
-upstream test budgets of 4 h (Python) and 3 h (Rust). Timing: 4 screen rounds, 6 full rounds,
+ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924.
+The upstream test budgets in the policy are unused here. Timing: 4 screen rounds, 6 full rounds,
 rerun multiplier 2, 1 warm-up, at least 2 timed calls and 1 s per round. Cost thresholds
 (fixed, never calibrated): panel ratio 1.03, case ratio 1.10 above a 25 ms (32 MiB) floor,
 screen fraction 0.5.

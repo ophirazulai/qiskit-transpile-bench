@@ -121,3 +121,46 @@ def run_worker(build, job, directory, hash_seed="0"):
     for row in results:
         row.setdefault("job_file", str(directory / "job.json"))
     return results
+
+
+def run_verifier_batch(python, pairs, directory, idle_timeout=300):
+    """Verify ``pairs`` ({job, out}) in one pinned verifier process.
+
+    The idle timeout applies per job: the process is killed once no new result has appeared
+    for ``idle_timeout`` seconds. Returns a reason when it stopped before finishing.
+    """
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    write_json(directory / "batch.json", pairs)
+    command = [python, "-P", "-m", "qtb_verifier", "--batch", str(directory / "batch.json")]
+    outs = [Path(pair["out"]) for pair in pairs]
+    done, last, timed_out = 0, time.monotonic(), False
+    with (directory / "verifier.log").open("ab") as log:
+        process = subprocess.Popen(
+            command,
+            cwd=directory,
+            env=sanitized_environment(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            while process.poll() is None:
+                count = sum(out.exists() for out in outs[done:]) + done
+                if count > done:
+                    done, last = count, time.monotonic()
+                elif time.monotonic() - last > idle_timeout:
+                    timed_out = True
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    break
+                time.sleep(0.05)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+    if all(out.exists() for out in outs):
+        return None
+    if timed_out:
+        return f"Verifier timed out after {idle_timeout} s; log: {directory / 'verifier.log'}"
+    return f"Verifier exited {process.returncode}; log: {directory / 'verifier.log'}"

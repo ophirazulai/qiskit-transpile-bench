@@ -1,6 +1,7 @@
 """Comparison orchestration; this process never imports Qiskit."""
 
 import hashlib
+import os
 import random
 import subprocess
 import sys
@@ -325,43 +326,128 @@ class Comparison:
         )
         return cases
 
+    @property
+    def workers(self):
+        """Concurrency for correctness jobs; never used for timing or memory measurement."""
+        return max(1, min(12, (os.cpu_count() or 2) - 1))
+
+    def jobs(self, specs):
+        """Run independent ``job`` specs concurrently; results keep the order of ``specs``."""
+        specs = list(specs)
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            return list(pool.map(lambda spec: self.job(*spec), specs))
+
     def oracle(self, case, result, oracle, reference=None, **extra):
-        ref = reference or (
-            case["semantic_reference"]
-            if case["semantic_reference"]["kind"] == "frozen_circuit"
-            else case["circuit"]
+        return self.verify_many([(case, result, oracle, reference, extra)])[0]
+
+    def verifier_identity(self):
+        return digest(
+            {
+                "implementation": self.run["hashes"].get("implementation")
+                or implementation_identity(),
+                "locks": {
+                    name: file_hash(self.data / "envs" / name)
+                    for name in ("common.lock", "verifier.lock")
+                },
+            }
         )
-        reference_path = verify_artifact(self.fixtures, ref, circuit=True)
-        directory = self.directory / "oracle-jobs" / uuid.uuid4().hex
-        directory.mkdir(parents=True)
-        job = {
-            "protocol": "qtb-verifier/1",
-            "reference": str(reference_path),
-            "reference_hash": ref["sha256"],
-            "output": result["output"],
-            "layout": result["layout"],
-            "input_domain": case["input_domain"],
-            "oracle": oracle,
-            **extra,
-        }
-        write_json(directory / "job.json", job)
-        command = [
-            self.run["verifier_python"],
-            "-P",
-            "-m",
-            "qtb_verifier",
-            "--job",
-            str(directory / "job.json"),
-            "--out",
-            str(directory / "result.json"),
-        ]
-        try:
-            run_logged(
-                command, directory, sanitized_environment(), directory / "verifier.log", timeout=300
+
+    def verify_many(self, requests):
+        """Verify (case, result, oracle, reference, extra) requests.
+
+        The verifier is a pure function of its job, so results are keyed by content: the
+        output, reference and target file hashes plus the oracle options. A seed or revision
+        that reproduces an output already verified, in this run or an earlier one, reuses that
+        result. Only decisive results (verified or mismatch) are cached.
+        """
+        if not requests:
+            return []
+        identity = self.verifier_identity()
+        jobs, keys = [], []
+        for case, result, oracle, reference, extra in requests:
+            ref = reference or (
+                case["semantic_reference"]
+                if case["semantic_reference"]["kind"] == "frozen_circuit"
+                else case["circuit"]
             )
-            return read_json(directory / "result.json")
-        except HarnessError as exc:
-            return {"status": "unverified", "oracle": oracle, "detail": str(exc)}
+            reference_path = verify_artifact(self.fixtures, ref, circuit=True)
+            job = {
+                "protocol": "qtb-verifier/1",
+                "reference": str(reference_path),
+                "reference_hash": ref["sha256"],
+                "output": result["output"],
+                "layout": result["layout"],
+                "input_domain": case["input_domain"],
+                "oracle": oracle,
+                **(extra or {}),
+            }
+            content = {
+                k: file_hash(v) if k in {"output", "reference", "target"} else v
+                for k, v in job.items()
+            }
+            jobs.append(job)
+            keys.append(digest({"verifier": identity, "job": content}))
+        cache = self.root / "verifier-cache"
+        results = {}
+        for key in set(keys):
+            path = cache / key[:2] / f"{key}.json"
+            if path.exists():
+                results[key] = dict(read_json(path), cached=True)
+        pending = {}
+        for key, job in zip(keys, jobs, strict=True):
+            if key not in results:
+                pending.setdefault(key, job)
+        if pending:
+            fresh = self.run_verifier(pending)
+            for key, result in fresh.items():
+                if result.get("status") in {"verified", "mismatch"}:
+                    write_json(cache / key[:2] / f"{key}.json", result)
+            results.update(fresh)
+        return [dict(results[key]) for key in keys]
+
+    def run_verifier(self, pending):
+        """Run unique verifier jobs in batches across a process pool."""
+        from qtb.coordinator.process import run_verifier_batch
+
+        entries = []
+        for key, job in pending.items():
+            directory = self.directory / "oracle-jobs" / uuid.uuid4().hex
+            directory.mkdir(parents=True)
+            write_json(directory / "job.json", job)
+            entries.append((key, directory, job["oracle"]))
+        size = max(1, min(50, -(-len(entries) // self.workers)))
+        chunks = [entries[i : i + size] for i in range(0, len(entries), size)]
+
+        def verify_chunk(chunk):
+            results = {}
+            while chunk:
+                batch = self.directory / "oracle-jobs" / f"batch-{uuid.uuid4().hex}"
+                pairs = [
+                    {"job": str(d / "job.json"), "out": str(d / "result.json")}
+                    for _, d, _ in chunk
+                ]
+                problem = run_verifier_batch(self.run["verifier_python"], pairs, batch)
+                missing = []
+                for key, directory, oracle in chunk:
+                    if (directory / "result.json").exists():
+                        results[key] = read_json(directory / "result.json")
+                    else:
+                        missing.append((key, directory, oracle))
+                if not missing:
+                    break
+                # Jobs run in order, so the first missing job is the one that stopped the
+                # process. It is unverified; the rest get a fresh process.
+                key, _, oracle = missing[0]
+                results[key] = {"status": "unverified", "oracle": oracle, "detail": problem}
+                chunk = missing[1:]
+            return results
+
+        merged = {}
+        with locked(runner_lock(), shared=True):
+            with ThreadPoolExecutor(max_workers=self.workers) as pool:
+                for results in pool.map(verify_chunk, chunks):
+                    merged.update(results)
+        return merged
 
     def quality(self, cases, smoke=False, revisions=("baseline", "evolved")):
         block = "B0"
@@ -433,6 +519,7 @@ class Comparison:
                         if not smoke
                         else {}
                     )
+                    finished, lite = [], []
                     for result in rows:
                         observation = {
                             "format": "qtb-observation/1",
@@ -498,17 +585,17 @@ class Comparison:
                                     and not observation.get("free_parameters")
                                 ):
                                     union_width = structural["union_width"]
-                                    check = (
-                                        self.oracle(case, result, "C1-lite")
-                                        if union_width <= 25
-                                        else {
-                                            "status": "unverified",
-                                            "detail": "Union width exceeds limit",
-                                        }
-                                    )
-                                    observation["checks"].append(
-                                        dict(check, oracle="C1-lite", union_width=union_width)
-                                    )
+                                    if union_width <= 25:
+                                        lite.append((observation, result, union_width))
+                                    else:
+                                        observation["checks"].append(
+                                            {
+                                                "status": "unverified",
+                                                "detail": "Union width exceeds limit",
+                                                "oracle": "C1-lite",
+                                                "union_width": union_width,
+                                            }
+                                        )
                         else:
                             subject = "reference" if revision == "baseline" else "evolved"
                             self.evidence(
@@ -520,6 +607,15 @@ class Comparison:
                                     detail=result.get("error", "Worker failed"),
                                 )
                             )
+                        finished.append((observation, result))
+                    verdicts = self.verify_many(
+                        [(case, result, "C1-lite", None, {}) for _, result, _ in lite]
+                    )
+                    for (observation, _, union_width), check in zip(lite, verdicts, strict=True):
+                        observation["checks"].append(
+                            dict(check, oracle="C1-lite", union_width=union_width)
+                        )
+                    for observation, result in finished:
                         append_record(self.directory / "observations.jsonl", observation)
                         if result["status"] == "ok" and use_cache:
                             cache_quality_observation(cache, result["seed"], observation)
@@ -785,7 +881,9 @@ class Comparison:
                     return self.finish()
                 behavior_checks(self, revisions=("evolved",))
                 clifford_checks(self, cases)
-                upstream_checks(self)
+                # Qiskit's own test suite gates acceptance, not every iteration.
+                if self.run["profile"] == "confirm-profile":
+                    upstream_checks(self)
                 if any(r["result"] == "failed" for r in self.records):
                     return self.finish()
             rows = self.quality(cases, smoke=smoke)

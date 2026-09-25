@@ -53,7 +53,8 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `verifier/` | Coordinator | Verifier environment |
 | `harness-wheel/`, `harness-build.log` | Coordinator | The harness wheel installed everywhere |
 | `jobs/<uuid>/` | Worker | `job.json`, `worker.log`, `out/results.jsonl`, output circuits `out/output-<seed>.ops.jsonl.gz` |
-| `oracle-jobs/<uuid>/` | Verifier | `job.json`, `result.json`, `verifier.log` |
+| `oracle-jobs/<uuid>/` | Verifier | `job.json`, `result.json` for each distinct verifier job not already cached |
+| `oracle-jobs/batch-<uuid>/` | Verifier | `batch.json` (the jobs one verifier process ran, in order) and its `verifier.log` |
 | `decision.json` | Reporter | Machine-readable verdict (`compare` only) |
 | `report.md` | Reporter | Human-readable verdict (`compare` only) |
 | `smoke.json` | `smoke` | Smoke result; no decision is written |
@@ -61,7 +62,7 @@ SMOKE OK: /…/results/runs/20260924T135815-5702c324
 | `reevaluations/<timestamp>/` | `evaluate --run` | A recomputed `decision.json` and `report.md`; the original is never changed |
 
 Outside the run directory, the results root also holds shared caches and counters:
-`build-cache/`, `quality-cache/`, `decision-counts.json` and `qualifications/`.
+`build-cache/`, `quality-cache/`, `verifier-cache/`, `decision-counts.json` and `qualifications/`.
 See [architecture.md](architecture.md#caches-and-shared-state-in-the-results-root).
 
 ## `smoke.json`

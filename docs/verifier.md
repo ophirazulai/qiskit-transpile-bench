@@ -27,6 +27,18 @@ Guarantees:
   codec (`qtb_worker.adapter.import_circuit`) in its own environment.
 - Any exception becomes `status: "unverified"`. It never becomes a pass.
 
+One verifier process verifies a batch of jobs (`--batch`), so Qiskit is imported once per
+batch rather than once per check. Batches run across a process pool. A job that produces no
+result within 300 s, or whose process dies, is `unverified`; the jobs after it in the batch get
+a fresh process.
+
+Verifier results are content-addressed. The key covers the output, reference and target file
+hashes, the oracle and its options, the harness implementation and the verifier locks. Each
+distinct output is verified once per run, and decisive results (`verified`, `mismatch`) are
+cached in `results/verifier-cache/`. A seed or revision that reproduces an output already
+checked, in this run or an earlier one, reuses the result. On the C1–C5 suite, 5 seeds
+produce about 850 distinct outputs out of 2,400 compiles per revision.
+
 The verifier environment is built once per run in `results/runs/<run>/verifier/env`
 (`pip install -r envs/common.lock -r envs/verifier.lock <harness wheel>`, about 45 seconds). See
 [environments.md](environments.md).
@@ -61,7 +73,7 @@ feed the [stage-coverage rule](metrics.md#7-change-scope-and-stage-coverage).
 | C5 | Scheduling validity | Scheduled fixtures | Verifier (`schedule.py`) | Pure Python timeline check |
 | API | Pass-manager contracts | Level-2 fixtures | Worker `api_checks` mode, judged by the coordinator | — |
 | C6 | Routing replay | Every scored and basis-guard seed; 10 seeds of other static guards | Coordinator (`metrics/replay.py`) | Pure Python, exact |
-| C7 | Clifford variants at full scale | 10 seeds of the 100-qubit circuits' Clifford variants | Verifier (`small_exact.py`) | Stabilizer tableaux |
+| C7 | Clifford variants at full scale | 3 seeds (iterations) or 10 seeds (confirm) of the 100-qubit circuits' Clifford variants | Verifier (`small_exact.py`) | Stabilizer tableaux |
 | C1-lite | Zero-input state equivalence of scored outputs | Confirm profile: scored cases ≤ 25 qubits, first 10 seeds | Verifier (`layout_semantics.py`) | Statevectors / measurement branches |
 
 ### C0: structure (every output)
@@ -160,7 +172,9 @@ compile cost of a quality run.
 Each 100-qubit scored circuit has a frozen **Clifford variant**: every rotation angle is
 replaced by a random odd multiple of π/2, which keeps the routing problem. Clifford circuits
 can be compared exactly at any width through their stabilizer tableaux. Each revision compiles
-the variant on 10 seeds in two ways:
+the variant in two ways, on 3 seeds in the iterations profile and 10 in the confirm profile.
+C6 already replays layout and routing on every scored seed, so C7's own contribution is
+translation (and optimization, in full mode) at full width, which does not need many seeds:
 
 - **Full pipeline:** covers all stages when it verifies. At levels 2–3, two-qubit
   resynthesis usually emits non-Clifford angles, so the result is often `unverified`.
@@ -186,15 +200,30 @@ exponential. C1-lite covers **all stages** for the `all_zero` input domain.
 
 ## Upstream tests
 
-Not a verifier function, but also part of correctness (`coordinator/upstream.py`):
+Not a verifier function, but also part of correctness (`coordinator/upstream.py`). They run
+**only in the confirm profile**: they gate acceptance, not every iteration.
 
-- The **baseline snapshot's** `test/python/transpiler` and `test/python/compiler` run against
-  each build. The candidate cannot pass by weakening its own tests. The binding result is
-  "no new failures compared with the baseline".
-- `cargo test --locked -p qiskit-transpiler` runs in each build's source copy.
+- The **baseline snapshot's** `test/python/transpiler` and `test/python/compiler` run under
+  pytest against each build. The candidate cannot pass by weakening its own tests.
+- pytest runs with `--rootdir` set to the test copy and `-c` pointing at the snapshot's own
+  pytest configuration (an empty one when the snapshot has none, as Qiskit does). The harness
+  project's settings never apply, and node IDs are identical across revisions.
+- The runner script has a `__main__` guard. Without it, macOS `spawn` workers re-import it
+  and re-run the whole suite, which breaks every parallel-transpile test.
+- `cargo test --locked --no-fail-fast -p qiskit-transpiler` runs in each build's source copy,
+  and failures are parsed test by test.
+- **Known-bad baseline failures.** Tests that fail on the baseline are recorded on
+  `CA1/upstream/baseline` (result `unresolved`, list in `known_bad`) and never count against
+  the candidate. The evolved build fails only on a **regression**: a test that fails but
+  passed on the baseline, or a baseline-passing test that no longer passes (failed, skipped
+  or missing, for example after a collection error). An incomplete suite gives `unresolved`.
 - The candidate's own Python tests run too, report-only (`upstream-evolved-own.json`).
 - Budgets: 4 h for Python and 3 h for Rust (`policy.json`). A timeout gives `unresolved`.
 - Changed test files are listed in `changed-tests.json`.
+
+Qiskit's own CI runs this suite with stestr (unittest), not pytest. Nine
+`TestUnitarySynthesisPlugin` tests install their mock plugins in `setUpClass` in a way that
+works under unittest but not under pytest, so they appear as known-bad baseline failures.
 
 ## Determinism audit
 

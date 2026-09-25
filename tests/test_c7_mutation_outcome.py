@@ -36,10 +36,13 @@ def test_c7_mutations_propagate_to_verdict(tmp_path, mutation, expected_status, 
     comparison = SimpleNamespace(
         directory=tmp_path,
         prefix="IA",
-        job=job,
-        oracle=lambda _case, output, *_args, **_kwargs: verify_clifford(
-            reference, corrupted if output["corrupted"] else reference.copy(), None
-        ),
+        jobs=lambda specs: [job(*spec) for spec in specs],
+        verify_many=lambda requests: [
+            verify_clifford(
+                reference, corrupted if output["corrupted"] else reference.copy(), None
+            )
+            for _case, output, *_rest in requests
+        ],
         evidence=evidence.append,
     )
     case = {"case_id": "sample", "clifford_variant": {"sha256": "fixture"}, "options": {}}

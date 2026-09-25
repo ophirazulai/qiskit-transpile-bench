@@ -1,7 +1,14 @@
-"""Baseline-owned Python tests and inline Rust tests."""
+"""Baseline-owned Python tests and inline Rust tests.
 
+Only the confirm profile runs these. The baseline's own failures are known-bad: the evolved
+revision is judged only on tests that stop passing relative to the baseline.
+"""
+
+import configparser
+import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 from qtb.canonical import write_json
@@ -10,23 +17,80 @@ from qtb.envbuild import run_logged, sanitized_environment
 from qtb.errors import HarnessError
 from qtb.evaluator import record
 
+# The guard matters: macOS starts multiprocessing workers with "spawn", which re-imports the
+# main script. Without it every worker re-runs the whole suite and then exits, breaking the
+# pool of each parallel-transpile test.
 RUNNER = """import json
 import sys
 from pathlib import Path
 
-root, output = Path(sys.argv[1]), Path(sys.argv[2])
-sys.path.insert(0, str(root))
-import pytest
 
 class Recorder:
-    def pytest_runtest_logreport(self, report):
-        row = dict(nodeid=report.nodeid, when=report.when, outcome=report.outcome,
-                   detail=str(report.longrepr) if report.failed else "")
-        with output.open("a") as stream:
+    def __init__(self, output):
+        self.output = output
+
+    def write(self, row):
+        with self.output.open("a") as stream:
             stream.write(json.dumps(row) + "\\n")
 
-raise SystemExit(pytest.main(sys.argv[3:], plugins=[Recorder()]))
+    def pytest_runtest_logreport(self, report):
+        self.write(dict(nodeid=report.nodeid, when=report.when, outcome=report.outcome,
+                        detail=str(report.longrepr) if report.failed else ""))
+
+    def pytest_collectreport(self, report):
+        # A module that no longer imports must not silently drop its tests.
+        if report.failed:
+            self.write(dict(nodeid=report.nodeid, when="collect", outcome="failed",
+                            detail=str(report.longrepr)))
+
+
+def main():
+    root, output = Path(sys.argv[1]), Path(sys.argv[2])
+    sys.path.insert(0, str(root))
+    import pytest
+
+    return pytest.main(sys.argv[3:], plugins=[Recorder(output)])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 """
+
+EMPTY_CONFIG = "[pytest]\n"
+PYTEST_COMPLETED = {0, 1}  # 0: all passed, 1: some tests failed. Anything else: incomplete.
+RUST_TEST = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)\s*$", re.MULTILINE)
+
+
+def pytest_config(source):
+    """The snapshot's own pytest configuration, never the harness project's."""
+    source = Path(source)
+    if (source / "pytest.ini").exists():
+        return (source / "pytest.ini").read_text()
+    for name, section in (("tox.ini", "pytest"), ("setup.cfg", "tool:pytest")):
+        if (source / name).exists():
+            parser = configparser.ConfigParser(interpolation=None)
+            try:
+                parser.read(source / name)
+            except configparser.Error:
+                continue
+            if parser.has_section(section):
+                body = "".join(f"{k} = {v}\n" for k, v in parser.items(section))
+                return "[pytest]\n" + body
+    if (source / "pyproject.toml").exists():
+        options = (
+            tomllib.loads((source / "pyproject.toml").read_text())
+            .get("tool", {})
+            .get("pytest", {})
+            .get("ini_options")
+        )
+        if options:
+            lines = []
+            for key, value in options.items():
+                if isinstance(value, list):
+                    value = "\n    " + "\n    ".join(map(str, value))
+                lines.append(f"{key} = {value}\n")
+            return "[pytest]\n" + "".join(lines)
+    return EMPTY_CONFIG
 
 
 def prepare_tests(snapshot, directory):
@@ -35,9 +99,12 @@ def prepare_tests(snapshot, directory):
     source = Path(snapshot)
     if not (directory / "test").exists():
         shutil.copytree(source / "test", directory / "test")
-        for name in ("pytest.ini", "setup.cfg", ".stestr.conf"):
+        for name in ("setup.cfg", ".stestr.conf"):
             if (source / name).exists():
                 shutil.copy2(source / name, directory / name)
+    # An explicit config file pins rootdir and node IDs to this directory, so the harness
+    # project's own pytest settings never apply and node IDs match across revisions.
+    (directory / "pytest.ini").write_text(pytest_config(source))
     runner = directory / "run_tests.py"
     runner.write_text(RUNNER)
     return runner
@@ -50,6 +117,7 @@ def python_suite(build, snapshot, directory, locks, timeout_s):
     if results.exists():
         results.unlink()
     env = sanitized_environment()
+    completed = False
     try:
         run_logged(
             [build["python"], "-m", "pip", "install", "-r", Path(locks) / "dev-tests.lock"],
@@ -65,6 +133,11 @@ def python_suite(build, snapshot, directory, locks, timeout_s):
                     runner,
                     directory,
                     results,
+                    "-c",
+                    directory / "pytest.ini",
+                    f"--rootdir={directory}",
+                    "-p",
+                    "no:cacheprovider",
                     "test/python/transpiler",
                     "test/python/compiler",
                     "-q",
@@ -76,14 +149,12 @@ def python_suite(build, snapshot, directory, locks, timeout_s):
                 timeout=timeout_s,
                 check=False,
             )
-        status = (
-            "passed" if proc.returncode == 0 else "failed" if proc.returncode == 1 else "unresolved"
-        )
+        completed = proc.returncode in PYTEST_COMPLETED
     except (HarnessError, subprocess.TimeoutExpired):
-        status = "unresolved"
+        pass
     rows = read_records(results)
     return {
-        "result": status,
+        "completed": completed,
         "records": str(results),
         "log": str(log),
         "failed": sorted({r["nodeid"] for r in rows if r["outcome"] == "failed"}),
@@ -97,6 +168,8 @@ def rust_suite(build, directory, timeout_s):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     log = directory / "rust.log"
+    if log.exists():
+        log.unlink()
     env = sanitized_environment(
         {
             "RUSTUP_TOOLCHAIN": build["toolchain_channel"],
@@ -104,19 +177,51 @@ def rust_suite(build, directory, timeout_s):
         }
     )
     try:
+        # --no-fail-fast: every test binary runs, so failures compare test by test.
         run_logged(
-            ["cargo", "test", "--locked", "-p", "qiskit-transpiler"],
+            ["cargo", "test", "--locked", "--no-fail-fast", "-p", "qiskit-transpiler"],
             Path(build["environment"]).parent / "source",
             env,
             log,
             timeout=timeout_s,
         )
-        return "passed"
     except HarnessError:
-        # Cargo exit 101 also means compilation failed; only executed test
-        # assertions establish a correctness failure.
-        text = log.read_text() if log.exists() else ""
-        return "failed" if "test result: FAILED." in text else "unresolved"
+        pass
+    text = log.read_text(errors="replace") if log.exists() else ""
+    outcomes = {name: outcome for name, outcome in RUST_TEST.findall(text)}
+    # Cargo exit 101 also means compilation failed; only executed tests establish results.
+    completed = "test result:" in text and "could not compile" not in text
+    return {
+        "completed": completed,
+        "log": str(log),
+        "failed": sorted(n for n, o in outcomes.items() if o == "FAILED"),
+        "passed": sorted(n for n, o in outcomes.items() if o == "ok"),
+    }
+
+
+def judge(baseline, evolved):
+    """Result for each revision; the baseline's failures are known-bad, never violations."""
+    if not baseline["completed"]:
+        base = ("unresolved", "Baseline suite did not complete")
+    elif baseline["failed"]:
+        base = ("unresolved", f"{len(baseline['failed'])} known-bad baseline failures")
+    else:
+        base = ("passed", "")
+    if not evolved["completed"]:
+        return base, ("unresolved", "Evolved suite did not complete"), []
+    if not baseline["completed"]:
+        if evolved["failed"]:
+            return base, ("unresolved", "No complete baseline to compare failures with"), []
+        return base, ("passed", ""), []
+    # Anything the baseline passes must still pass: a failure, an error, a skip or a test
+    # that disappeared (for example after a collection error) is a regression.
+    regressions = sorted(
+        (set(evolved["failed"]) - set(baseline["failed"]))
+        | (set(baseline["passed"]) - set(evolved["passed"]))
+    )
+    if regressions:
+        return base, ("failed", f"{len(regressions)} tests regressed against baseline"), regressions
+    return base, ("passed", ""), []
 
 
 def upstream_checks(comparison):
@@ -130,45 +235,41 @@ def upstream_checks(comparison):
         },
     )
     baseline = comparison.run["builds"]["baseline"]
-    results = {}
-    for revision, subject in (("baseline", "reference"), ("evolved", "evolved")):
-        build = comparison.run["builds"][revision]
-        result = python_suite(
-            build,
+    python = {
+        revision: python_suite(
+            comparison.run["builds"][revision],
             baseline["snapshot"]["path"],
             comparison.directory / f"upstream-{revision}",
             comparison.data / "envs",
             budgets["python"],
         )
-        results[revision] = result
-        status = result["result"]
-        if revision == "evolved" and status == "failed":
-            new = set(result["failed"]) - set(results["baseline"]["failed"])
-            status = "failed" if new else "unresolved"
-        comparison.evidence(
-            record(
-                f"{comparison.prefix}1/upstream/{revision}",
-                "correctness",
-                status,
-                subject,
-                **{k: v for k, v in result.items() if k != "result"},
-            )
-        )
+        for revision in ("baseline", "evolved")
+    }
     rust = {
-        rev: rust_suite(
-            comparison.run["builds"][rev],
-            comparison.directory / f"upstream-{rev}",
+        revision: rust_suite(
+            comparison.run["builds"][revision],
+            comparison.directory / f"upstream-{revision}",
             budgets["rust"],
         )
-        for rev in ("baseline", "evolved")
+        for revision in ("baseline", "evolved")
     }
-    for revision, subject in (("baseline", "reference"), ("evolved", "evolved")):
-        status = rust[revision]
-        if revision == "evolved" and status == "failed" and rust["baseline"] != "passed":
-            status = "unresolved"
-        comparison.evidence(
-            record(f"{comparison.prefix}1/upstream/rust/{revision}", "correctness", status, subject)
-        )
+    ids = []
+    for suite, results in (("", python), ("rust/", rust)):
+        base, evolved, regressions = judge(results["baseline"], results["evolved"])
+        for revision, subject, (status, detail) in (
+            ("baseline", "reference", base),
+            ("evolved", "evolved", evolved),
+        ):
+            ids.append(f"{comparison.prefix}1/upstream/{suite}{revision}")
+            details = {k: v for k, v in results[revision].items() if k not in {"passed"}}
+            details["passed_count"] = len(results[revision]["passed"])
+            if revision == "baseline":
+                details["known_bad"] = details.pop("failed")
+            else:
+                details["regressions"] = regressions
+            comparison.evidence(
+                record(ids[-1], "correctness", status, subject, detail=detail, **details)
+            )
     # The candidate's own Python suite is explicitly report-only.
     own = python_suite(
         comparison.run["builds"]["evolved"],
@@ -178,15 +279,15 @@ def upstream_checks(comparison):
         budgets["python"],
     )
     write_json(comparison.directory / "upstream-evolved-own.json", own)
-    all_passed = all(
+    evolved_passed = all(
         r["result"] == "passed"
         for r in comparison.records
-        if r["id"].startswith(f"{comparison.prefix}1/upstream/")
+        if r["id"] in ids and r["subject"] == "evolved"
     )
     comparison.evidence(
         record(
             f"{comparison.prefix}1/upstream",
             "correctness",
-            "passed" if all_passed else "unresolved",
+            "passed" if evolved_passed else "unresolved",
         )
     )

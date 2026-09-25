@@ -123,8 +123,10 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
    the frozen hashes. This proves that both revisions compile identical inputs.
 4. **Baseline preflight.** The baseline runs the frozen C1–C5 correctness suite. If the
    baseline itself fails, the run stops with `INCONCLUSIVE`.
-5. **Evolved correctness:** the C1–C5 suite, C7 Clifford variants, and the upstream Python and
-   Rust tests. If any check fails, the run stops and writes the decision.
+5. **Evolved correctness:** the C1–C5 suite, C7 Clifford variants and, in the confirm profile
+   only, the upstream Python and Rust tests. If an evolved check fails, the run stops and
+   writes the decision. Upstream failures the baseline shares are known-bad and never stop
+   the run.
 6. **Quality:** every non-timing case of the profile, for both revisions, on seed block B0.
    Each output gets C0 (structure) and, where applicable, C6 (routing replay) and C1-lite
    (confirm profile). Baseline observations come from the quality cache when possible.
@@ -146,6 +148,7 @@ Implemented in `Comparison.execute()` in `src/qtb/coordinator/__init__.py`:
 | --- | --- | --- |
 | `results/build-cache/<slot>/<identity>/` | Built Qiskit wheels, one slot each for baseline and evolved | Same source tree hash, Python, locks, Rust toolchain, C compilers, build flags, OS and architecture |
 | `results/quality-cache/<key>/` | Per-seed quality observations and their output files | Same build, case definition, CPU model, worker protocol, harness implementation, measurement protocol, seed block |
+| `results/verifier-cache/<xx>/<key>.json` | Decisive (`verified`/`mismatch`) verifier results | Same output, reference and target file hashes, oracle options, harness implementation and verifier locks |
 | `results/decision-counts.json` | Every decision per manifest hash | Always appended; shows how often a profile has been used |
 | `results/qualifications/<hash>.json` | Maintainer attestation that a run's configuration is qualified | Written by hand; see [implementation-status.md](implementation-status.md) |
 

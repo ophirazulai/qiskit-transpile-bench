@@ -47,8 +47,8 @@ caches for the pinned Python and Rust dependencies. See [environments](docs/envi
 2. **Same inputs.** Both revisions rebuild every benchmark circuit and target from frozen data
    and must reproduce the exact hashes, which proves they compile the same thing.
 3. **Correctness first.** Both revisions run a frozen suite of 2,400 small compiles that
-   are checked exactly, plus Clifford checks on the large circuits and the baseline's own
-   upstream Python and Rust tests.
+   are checked exactly, plus Clifford checks on the large circuits. The confirm profile also
+   runs the baseline's own upstream Python and Rust tests.
 4. **Compile the workload.** Every benchmark case is compiled with up to 100 transpiler seeds by
    both revisions. Every output is checked for legality on the target, and routing is
    replayed exactly to prove the layout and SWAPs are right.
@@ -116,7 +116,8 @@ Usage errors exit 64.
 harness validation, not a qualified measurement setup. Every run requires a
 `harness/qualification` record, which exists only after a maintainer has validated the setup on
 a controlled runner and written an attestation file. Until then, even a fully successful run
-ends `INCONCLUSIVE`. The baseline's upstream Python and Rust tests must also pass. See
+ends `INCONCLUSIVE`. In the confirm profile, the baseline's upstream Python and Rust tests must
+also show no new failures on the evolved build. See
 [implementation status](docs/implementation-status.md).
 
 Changes to the optimization stage, two-qubit synthesis or shared infrastructure are
@@ -155,7 +156,8 @@ for details.
 | Confirm quality compiles | About 3.5 CPU-hours for the candidate once the baseline is cached |
 | Cost panels, iterations | One round (2 arms × 16 cases) is about 1.5 min. Typical: the 4-round screen, about 6–7 min. Worst: screen + 6-round full measurement + 12-round rerun = 22 rounds, about 35 min. Add about 10–20 min for the multi-seed companion when the change touches layout or routing |
 | Cost panels, confirm | One round (2 arms × 36 cases) is about 3.5 min. Typical: the 4-round screen (about 14 min) plus memory (about 10 min), about 25 min. Worst: screen + 10-round full + 20-round rerun = 34 rounds, about 2 h, plus a memory rerun |
-| First `compare` against a new baseline | Also pays for the baseline's upstream tests (budgets of 4 h Python and 3 h Rust). There is no calibration step: the cost thresholds are fixed in `policy.json`, and the baseline's quality compiles are cached for later runs |
+| Correctness checks (C0–C5, C7) | Compiles run in parallel, and the verifier checks each distinct output once, in batches. Verifier results are cached by content in `verifier-cache/`, so a later run against the same baseline re-verifies only outputs that changed |
+| Upstream tests (confirm only) | Three Python runs of about 3–4 min each, plus Rust tests for both builds (budgets of 4 h Python and 3 h Rust). There is no calibration step: the cost thresholds are fixed in `policy.json`, and the baseline's quality compiles are cached for later runs |
 
 Cost panels are estimates from the design probes, not measured runs: no full comparison with
 cost measurement has been recorded yet. They run only after the quality test has passed, on an
