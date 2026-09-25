@@ -16,9 +16,7 @@ def test_upstream_suite_runs_baseline_tests_without_exclusions(tmp_path, monkeyp
     )
     monkeypatch.setattr("qtb.coordinator.upstream.run_logged", lambda *args, **kwargs: None)
 
-    result = python_suite(
-        {"python": sys.executable}, source, tmp_path / "suite", tmp_path, 60
-    )
+    result = python_suite({"python": sys.executable}, source, tmp_path / "suite", 60)
 
     assert result["completed"]
     assert result["passed"] == ["test/python/transpiler/test_example.py::test_first"]
@@ -40,7 +38,7 @@ def test_upstream_time_budgets_are_frozen_and_used(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr("qtb.coordinator.upstream.subprocess.run", run)
-    python_suite({"python": sys.executable}, source, tmp_path / "suite", tmp_path, 14400)
+    python_suite({"python": sys.executable}, source, tmp_path / "suite", 14400)
 
     def logged(command, cwd, env, log, timeout):
         seen["rust"] = timeout
@@ -69,7 +67,7 @@ def test_upstream_runner_survives_spawned_worker_processes(tmp_path, monkeypatch
     )
     monkeypatch.setattr("qtb.coordinator.upstream.run_logged", lambda *args, **kwargs: None)
 
-    result = python_suite({"python": sys.executable}, source, tmp_path / "suite", tmp_path, 120)
+    result = python_suite({"python": sys.executable}, source, tmp_path / "suite", 120)
 
     assert result["completed"]
     assert result["failed"] == []

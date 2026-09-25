@@ -34,14 +34,21 @@ a fresh process.
 
 Verifier results are content-addressed. The key covers the output, reference and target file
 hashes, the oracle and its options, the harness implementation and the verifier locks. Each
-distinct output is verified once per run, and decisive results (`verified`, `mismatch`) are
-cached in `results/verifier-cache/`. A seed or revision that reproduces an output already
-checked, in this run or an earlier one, reuses the result. On the C1–C5 suite, 5 seeds
+distinct output is verified once per session, and decisive results (`verified`, `mismatch`)
+are cached in the session's `verifier-cache/`, written atomically. A seed, revision or retried
+stage that reproduces an output already checked in the same session reuses the result. The
+cache is not shared between sessions, and `clean` deletes it. On the C1–C5 suite, 5 seeds
 produce about 850 distinct outputs out of 2,400 compiles per revision.
 
-The verifier environment is built once per run in `results/runs/<run>/verifier/env`
-(`pip install -r envs/common.lock -r envs/verifier.lock <harness wheel>`, about 45 seconds). See
-[environments.md](environments.md).
+The baseline half of the `correctness` stage (C1–C5, API contracts and C7 on the baseline)
+can come from the baseline store instead. It is stored only when every baseline check was
+decisive (`verified` or `mismatch`) and no worker failed or timed out, and it is reused only
+for the same baseline build, harness, correctness suite, profile, verifier, CPU model, worker
+environment, Clifford seeds and tolerances. A/A sessions always check both builds.
+
+The verifier environment is built once per session by `compile`, in
+`RESULTS_ROOT/verifier/env` (`pip install -r envs/common.lock -r envs/verifier.lock <harness
+wheel>`, about 45 seconds). See [environments.md](environments.md).
 
 Not everything runs in the verifier. The cheapest and most frequent checks (C0 structure and
 C6 routing replay) are pure Python in the coordinator (`src/qtb/metrics/`). They need no
@@ -203,8 +210,12 @@ exponential. C1-lite covers **all stages** for the `all_zero` input domain.
 
 ## Upstream tests
 
-Not a verifier function, but also part of correctness (`coordinator/upstream.py`). They run
-**only in the confirm profile**: they gate acceptance, not every iteration.
+Not a verifier function, but also part of correctness (`coordinator/upstream.py`). They are
+**optional**: they form their own stage, `unit-tests`, which either profile may run once the
+quality gate is open, alongside `correctness`. The rule is: **if you run it, it counts.** Once
+the stage has started (running, failed or complete), `decide` requires `IA1/upstream` or
+`CA1/upstream`. If it never started, or the gate skipped it, the verdict is decided without it
+and the report says "Upstream tests: not run."
 
 - The **baseline snapshot's** `test/python/transpiler` and `test/python/compiler` run under
   pytest against each build. The candidate cannot pass by weakening its own tests.
@@ -215,8 +226,18 @@ Not a verifier function, but also part of correctness (`coordinator/upstream.py`
   and re-run the whole suite, which breaks every parallel-transpile test.
 - `cargo test --locked --no-fail-fast -p qiskit-transpiler` runs in each build's source copy,
   and failures are parsed test by test.
+- **Stored builds stay unchanged.** The suites never install into a build environment: the
+  test dependencies (`envs/dev-tests.lock`) are installed when the build is made. pytest runs
+  with `PYTHONDONTWRITEBYTECODE=1`, as do the compile workers. The Rust tests of the baseline
+  use a session-local `CARGO_HOME` (`upstream-baseline/cargo`); the evolved build uses its own
+  `cargo/` in the session. `CARGO_TARGET_DIR` is `upstream-<rev>/target`, deleted when the
+  suite ends.
+- **Baseline results from the store.** When both baseline suites completed in an earlier
+  session with the same build, harness, `dev-tests.lock`, baseline test tree, budgets, CPU
+  model and worker environment, their results are read from the store and only the evolved
+  suites run. A/A sessions always run both.
 - **Known-bad baseline failures.** Tests that fail on the baseline are recorded on
-  `CA1/upstream/baseline` (result `unresolved`, list in `known_bad`) and never count against
+  `*1/upstream/baseline` (result `unresolved`, list in `known_bad`) and never count against
   the candidate. The evolved build fails only on a **regression**: a test that fails but
   passed on the baseline, or a baseline-passing test that no longer passes (failed, skipped
   or missing, for example after a collection error). An incomplete suite gives `unresolved`.
@@ -233,4 +254,6 @@ works under unittest but not under pytest, so they appear as known-bad baseline 
 Quality observations must be reproducible. After the B0 block, at least 5% (minimum 10) of
 observations per revision are recompiled, half of them with `PYTHONHASHSEED=1`. Each must
 reproduce the same output hash and layout. If one does not, `audit/determinism` is `unresolved`,
-which makes every quality verdict `unresolved`, and that revision's quality cache is deleted.
+which makes every quality verdict `unresolved`. The matching baseline quality entries in the
+store are then marked invalid (`invalidated.json`) and never reused; stored correctness and
+unit-test results are kept. Evolved observations are never stored.

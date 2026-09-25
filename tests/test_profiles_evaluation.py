@@ -108,11 +108,33 @@ def test_empty_leave_family_out_is_unresolved():
     assert summaries["leave_family_out/G1"]["status"] == "unavailable"
 
 
-@pytest.mark.parametrize("guard_regression", [False, True])
-def test_archived_synthetic_observations_replay_to_known_verdict(tmp_path, guard_regression):
-    from qtb.canonical import canonical_bytes, digest, read_json, write_json
-    from qtb.reevaluate import evaluate_run
+def split_evidence(evidence, profile="iterations-profile"):
+    """The synthetic passing evidence, as each stage would have written it."""
+    prefix = "CA" if profile == "confirm-profile" else "IA"
+    owner = {
+        "harness/roundtrip": "compile",
+        "audit/determinism": "quality",
+        f"{prefix}1/C0": "quality",
+        f"{prefix}1/C6": "quality",
+        f"{prefix}6/completeness": "quality",
+        "CA1/C1-lite": "quality",
+    }
+    stages = {}
+    for row in evidence:
+        if row["id"].endswith("/stage-coverage"):
+            continue  # decide computes it
+        stage = owner.get(row["id"]) or ("cost" if "5/" in row["id"] else "correctness")
+        stages.setdefault(stage, []).append(row)
+    return stages
 
+
+@pytest.mark.parametrize("guard_regression", [False, True])
+def test_decide_replays_synthetic_session_to_known_verdict(tmp_path, guard_regression, monkeypatch):
+    from conftest import write_session
+    from qtb.canonical import read_json
+    from qtb.coordinator.decide import decide
+
+    monkeypatch.setattr("qtb.coordinator.costs.replay_costs", lambda *args: args[-1])
     manifest, policy, rows, evidence = synthetic("iterations-profile")
     if guard_regression:
         guard = next(
@@ -126,29 +148,25 @@ def test_archived_synthetic_observations_replay_to_known_verdict(tmp_path, guard
         for row in rows:
             if row["case_id"] == guard["case_id"] and row["revision"] == "evolved":
                 row["D2"] = baseline[row["seed"]] * 1.08
-    hashes = {"manifest": digest(manifest), "policy": digest(policy)}
-    run = {
-        "run_id": "synthetic-run", "profile": "iterations-profile",
-        "hashes": hashes, "builds": {},
+    complete = {"status": "complete"}
+    states = {
+        "compile": complete,
+        "quality": dict(complete, gate="closed" if guard_regression else "improved"),
     }
-    write_json(tmp_path / "run.json", run)
-    write_json(tmp_path / "manifest.json", manifest)
-    write_json(tmp_path / "policy.json", policy)
-    write_json(tmp_path / "evidence.json", evidence)
-    write_json(tmp_path / "decision.json", {"archived": True})
-    (tmp_path / "observations.jsonl").write_bytes(
-        b"".join(canonical_bytes(row) + b"\n" for row in rows)
-    )
-    output, decision = evaluate_run(tmp_path)
+    if not guard_regression:
+        states.update(correctness=complete, cost=complete)
+    write_session(tmp_path, manifest, policy, rows, split_evidence(evidence), states)
+    code, decision = decide(tmp_path, progress=lambda *_: None)
     assert decision["status"] == ("CONSTRAINT_VIOLATION" if guard_regression else "PASS")
-    assert read_json(output / "decision.json") == decision
-    assert read_json(tmp_path / "decision.json") == {"archived": True}
+    assert code == (20 if guard_regression else 0)
+    assert read_json(tmp_path / "decision.json") == decision
     if guard_regression:
         assert any(
             record["id"].endswith(f"cap/{guard['case_id']}/D2")
             and record["result"] == "failed"
             for record in decision["constraints"]
         )
+        assert any("not checked" in note for note in decision["notes"])
 
 
 def test_guard_failure_outranks_no_improvement():
@@ -175,19 +193,13 @@ def test_incomplete_or_unstable_panel_cannot_claim_improvement(mutation):
     assert verdict(records, required) == "INCONCLUSIVE"
 
 
-def test_scope_is_conservative_level_aware_and_widen_only():
+def test_scope_is_conservative_and_level_aware():
     assert set(changed_scope(["crates/transpiler/src/passes/sabre/layout.rs"], 2)["stages"]) == {
         "layout",
         "routing",
     }
     assert "optimization" in changed_scope(["qiskit/transpiler/passes/layout/vf2.py"], 3)["stages"]
-    assert len(changed_scope(["unknown/new.py"], 2, ["layout"])["stages"]) == 6
-    assert (
-        "optimization"
-        in changed_scope(["crates/transpiler/src/passes/sabre/layout.rs"], 2, ["optimization"])[
-            "stages"
-        ]
-    )
+    assert len(changed_scope(["unknown/new.py"], 2)["stages"]) == 6
 
 
 def test_non_source_changes_do_not_widen_stage_scope():
@@ -204,7 +216,6 @@ def test_non_source_changes_do_not_widen_stage_scope():
     assert result["stages"] == ["layout", "routing"]
     assert result["unmapped_paths"] == []
     assert changed_scope(non_source, 2)["stages"] == []
-    assert changed_scope(non_source, 2, ["init"])["stages"] == ["init"]
     assert len(changed_scope(["examples/vf2_demo.py"], 2)["stages"]) == 6
 
 

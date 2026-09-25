@@ -16,21 +16,34 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked --all-extras
       - run: uv run pytest -q
-      - name: Compare frozen source folders
+      - name: Run the stage chain on frozen source folders
         id: compare
         continue-on-error: true
         env:
           QTB_BASELINE_PATH: ${{ vars.QTB_BASELINE_PATH }}
           QTB_EVOLVED_PATH: ${{ vars.QTB_EVOLVED_PATH }}
-        run: >-
-          uv run qiskit-transpile-bench compare
-          --baseline "$QTB_BASELINE_PATH" --evolved "$QTB_EVOLVED_PATH"
-          --profile confirm-profile --results-root results
+          # A persistent directory on the runner; it keeps the baseline between runs.
+          QTB_STORE: ${{ vars.QTB_STORE_PATH }}
+          SESSION: results/session-${{ github.run_id }}-${{ github.run_attempt }}
+        # Stages exit 0 when they complete or are skipped by the quality gate. A stage that
+        # fails or cannot start stops the chain, but decide always runs: it records the
+        # failure, and its exit status (the verdict's) fails this step unless it is PASS.
+        run: |
+          set +e
+          Q="uv run qiskit-transpile-bench"
+          $Q compile --baseline "$QTB_BASELINE_PATH" --evolved "$QTB_EVOLVED_PATH" \
+            --store "$QTB_STORE" --profile confirm-profile --results-root "$SESSION" &&
+          $Q quality --results-root "$SESSION" &&
+          $Q correctness --results-root "$SESSION" &&
+          $Q unit-tests --results-root "$SESSION" &&
+          $Q cost --results-root "$SESSION"
+          $Q decide --results-root "$SESSION"
       - name: Archive evidence and source snapshots
         if: always()
         run: >-
           tar -czf benchmark-results.tgz
           --exclude='*/env' --exclude='*/cargo' --exclude='*/builds/*-build*/source'
+          --exclude='*/verifier-cache'
           results
       - uses: actions/upload-artifact@v4
         if: always()

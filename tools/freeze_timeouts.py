@@ -1,14 +1,15 @@
 """Measure baseline compiles and draft a new manifest with frozen case timeouts.
 
-Measure on the intended controlled runner after building the baseline once::
+Measure on the intended controlled runner after ``compile`` has built the baseline once
+(SESSION is that session's results root)::
 
-    uv run python tools/freeze_timeouts.py measure --run results/runs/RUN \
+    uv run python tools/freeze_timeouts.py measure --run SESSION \
         --profile confirm-profile --out results/timeout-probes/confirm.jsonl
     uv run python tools/freeze_timeouts.py freeze --profile confirm-profile \
         --measurements results/timeout-probes/confirm.jsonl \
         --out results/timeout-probes/confirm-manifest.json
 
-The draft must be reviewed and qualified before replacing a shipped profile. A
+The draft must be reviewed and validated on the runner before replacing a shipped profile. A
 measurement is made for every seed of every quality case, and at the fixed seed
 for cost-only cases. Failed or missing measurements prevent freezing.
 """
@@ -57,7 +58,6 @@ def freeze(manifest, records, *, source_hash):
         )
     frozen = json.loads(json.dumps(manifest))
     frozen["version"] += 1
-    frozen["status"] = "unqualified"
     frozen["timeout_source"] = {
         "rule": "max(120 s, 10 x slowest measured baseline compile)",
         "measurements_sha256": source_hash,

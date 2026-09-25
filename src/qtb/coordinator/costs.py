@@ -12,6 +12,7 @@ from qtb.config import STAGES
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import locked, runner_lock
+from qtb.envbuild import machine_identity
 from qtb.errors import HarnessError, Incomplete
 from qtb.evaluator import record
 from qtb.evaluator.cost import (
@@ -116,7 +117,10 @@ def _too_busy():
 
 
 def _wait_until_quiet(timeout_s=300, poll_s=10):
-    """Let the one-minute load average decay after the concurrent correctness stages."""
+    """Let the one-minute load average decay before measuring; a second line of defence.
+
+    On a cluster the cost stage should already have an exclusive host (``bsub -x``).
+    """
     deadline = time.monotonic() + timeout_s
     while _too_busy():
         if time.monotonic() >= deadline:
@@ -247,7 +251,8 @@ def collect_panel(
             for arm in arms
         },
         "run_id": run["run_id"],
-        "machine": run["machine"],
+        # The cost host, which need not be the host that compiled the session.
+        "machine": machine_identity(),
         "measured_at": datetime.now(UTC).isoformat(),
         "complete": True,
         "estimator": estimator,

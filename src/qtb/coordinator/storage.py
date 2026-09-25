@@ -1,4 +1,4 @@
-"""Atomic run state, append-only observations, and scoped caches."""
+"""Atomic session state, append-only observations, locks and cache helpers."""
 
 import fcntl
 import json
@@ -28,17 +28,30 @@ COST_PROTOCOL_KEYS = {
 }
 
 
+class LockBusy(HarnessError):
+    """A non-blocking lock is held by another process."""
+
+
 def runner_lock():
-    """One machine/user lock even when comparisons use different results roots."""
-    return Path(tempfile.gettempdir()) / f"qtb-runner-{os.getuid()}.lock"
+    """One machine/user lock even when comparisons use different results roots.
+
+    The path is fixed under ``/tmp``: LSF often sets a per-job ``TMPDIR``, which would make a
+    lock under ``tempfile.gettempdir()`` private to one job. ``QTB_RUNNER_LOCK`` overrides it.
+    """
+    return Path(os.environ.get("QTB_RUNNER_LOCK") or f"/tmp/qtb-runner-{os.getuid()}.lock")
 
 
 @contextmanager
-def locked(path, shared=False):
+def locked(path, shared=False, wait=True):
+    """``flock`` on ``path``; with ``wait=False`` a held lock raises ``LockBusy``."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as stream:
-        fcntl.flock(stream, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        try:
+            fcntl.flock(stream, mode if wait else mode | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise LockBusy(f"Lock is held by another process: {path}") from exc
         try:
             yield
         finally:
@@ -133,7 +146,7 @@ def quality_cache_key(
 
 
 def cache_quality_observation(cache, seed, observation):
-    """Keep cache artifacts outside the run directory before retention prunes it."""
+    """Copy an observation's artifacts into a store entry, outside any session."""
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
     cached = dict(observation)
@@ -191,24 +204,42 @@ def cached_quality_observation(path):
     return None
 
 
-def register_decision(root, manifest_hash, run_id):
-    path = Path(root) / "decision-counts.json"
-    with locked(Path(root) / "decision-counts.lock"):
-        state = read_json(path) if path.exists() else {}
-        runs = state.setdefault(manifest_hash, [])
-        if run_id in runs:
-            return runs.index(run_id)
-        before = len(runs)
-        runs.append(run_id)
-        write_json(path, state)
-        return before
+QUALITY_INVALIDATED = "invalidated.json"
 
 
-def prune_outputs(directory, observations, limit):
-    """Retain failing/non-verified outputs; record every successful large-output deletion."""
+def quality_entry_valid(entry):
+    """A quality entry invalidated by a failed determinism audit is never reused."""
+    return not (Path(entry) / QUALITY_INVALIDATED).exists()
+
+
+def invalidate_quality_entry(entry, reason):
+    """Mark an entry unusable under its lock; its files stay, so readers never lose them."""
+    entry = Path(entry)
+    if not entry.exists():
+        return
+    with locked(entry / ".lock"):
+        if quality_entry_valid(entry):
+            write_json(entry / QUALITY_INVALIDATED, {"reason": reason})
+
+
+def store_quality_observation(entry, seed, observation):
+    """Add one baseline observation to a valid entry; returns whether it was stored."""
+    entry = Path(entry)
+    with locked(entry / ".lock", shared=True):
+        if not quality_entry_valid(entry):
+            return False
+        cache_quality_observation(entry, seed, observation)
+    return True
+
+
+def output_deletions(directory, observations, limit):
+    """Plan deletion of large outputs whose checks all verified; failures stay for review.
+
+    Returns ``{path: provenance}``. Only files inside ``directory`` are planned, so outputs
+    replayed from the baseline store are never touched. Nothing is deleted here.
+    """
     directory = Path(directory).resolve()
-    path = directory / "retention.json"
-    pruned = read_json(path) if path.exists() else {}
+    planned = {}
     for row in observations:
         if not row.get("output") or not row.get("checks"):
             continue
@@ -216,22 +247,19 @@ def prune_outputs(directory, observations, limit):
             continue
         output = Path(row["output"]).resolve()
         if output.is_relative_to(directory) and output.exists() and output.stat().st_size > limit:
-            pruned[str(output)] = {
+            planned[str(output)] = {
                 "output_hash": row["output_hash"],
                 "observation_id": row["id"],
+                "compressed_sha256": file_hash(output),
                 "compressed_bytes": output.stat().st_size,
             }
-            # Persist the reason and hash before deletion, preserving replay.
-            write_json(path, pruned)
-            output.unlink()
-    return pruned
+    return planned
 
 
-def prune_prefix_outputs(directory, observations, limit):
-    """Prune only verified C6 prefixes whose hash and job survive in evidence."""
+def prefix_output_deletions(directory, observations, limit):
+    """Plan deletion of verified C6 prefixes whose hash and job survive in the evidence."""
     directory = Path(directory).resolve()
-    path = directory / "retention.json"
-    pruned = read_json(path) if path.exists() else {}
+    planned = {}
     for row in observations:
         for check in row.get("checks", []):
             if check.get("oracle") != "C6" or check.get("status") != "verified":
@@ -253,7 +281,8 @@ def prune_prefix_outputs(directory, observations, limit):
                 job = read_json(job_file)
                 if job.get("mode") != "prefix" or row.get("seed") not in job.get("seeds", []):
                     continue
-                pruned[str(output)] = {
+                # The archived C6 check and job identify the verification and compile.
+                planned[str(output)] = {
                     "oracle": "C6",
                     "stage": prefix["stage"],
                     "output_hash": prefix["output_hash"],
@@ -262,8 +291,4 @@ def prune_prefix_outputs(directory, observations, limit):
                     "job_file": str(job_file),
                     "compressed_bytes": output.stat().st_size,
                 }
-                # The archived C6 check and job identify the verification and
-                # compile; write retention provenance before removing the file.
-                write_json(path, pruned)
-                output.unlink()
-    return pruned
+    return planned

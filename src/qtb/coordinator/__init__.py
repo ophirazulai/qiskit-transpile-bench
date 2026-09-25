@@ -1,9 +1,14 @@
-"""Comparison orchestration; this process never imports Qiskit."""
+"""Comparison orchestration; this process never imports Qiskit.
+
+A ``Comparison`` is one stage's view of a session directory. ``compile`` creates the session
+with ``Comparison.create``; every later stage opens it with ``Comparison.open``. Evidence is
+written per stage, under ``stages/<stage>/``; ``qtb.coordinator.stages`` runs the stages.
+"""
 
 import hashlib
 import os
 import random
-import subprocess
+import shutil
 import sys
 import time
 import uuid
@@ -12,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qtb.canonical import (
+    atomic_bytes,
     circuit_lines,
     digest,
     file_hash,
@@ -32,19 +38,20 @@ from qtb.coordinator.process import run_worker
 from qtb.coordinator.runlog import RunLog, depth, duration, step
 from qtb.coordinator.storage import (
     append_record,
-    cache_quality_observation,
     cached_quality_observation,
+    invalidate_quality_entry,
     locked,
-    prune_outputs,
-    prune_prefix_outputs,
     quality_cache_key,
+    quality_entry_valid,
     read_records,
-    register_decision,
     runner_lock,
+    store_quality_observation,
 )
+from qtb.coordinator.store import Store, build_key
 from qtb.envbuild import (
     baseline_toolchain,
-    build_revision,
+    build_identity,
+    build_into,
     diff_snapshots,
     machine_identity,
     run_logged,
@@ -52,12 +59,11 @@ from qtb.envbuild import (
     snapshot,
     verify_build,
 )
-from qtb.errors import HarnessError, Incomplete
-from qtb.evaluator import evaluate_quality, record
+from qtb.errors import HarnessError, Precondition, Usage
+from qtb.evaluator import record
 from qtb.evaluator.scope import changed_scope, covered
 from qtb.metrics import StructuralChecker, layout_errors
 from qtb.metrics.replay import replay
-from qtb.reporter import make_decision, write_report
 
 
 def structural_result(
@@ -119,83 +125,241 @@ def cost_stage_due(builds, records):
     return None
 
 
+def same_build(builds):
+    return (
+        "baseline" in builds
+        and "evolved" in builds
+        and builds["baseline"]["id"] == builds["evolved"]["id"]
+    )
+
+
+def gate(builds, records):
+    """Whether correctness, unit tests and cost run: ``(state, reason)``.
+
+    ``records`` are the evaluated quality records together with the compile and quality
+    evidence. Every non-improvement record must pass, including the round-trip, the audit,
+    C0, C6, C1-lite, the guards and completeness. Unlike ``cost_stage_due``, an unresolved
+    check closes the gate, also on an A/A run.
+
+    - ``improved``: every improvement record passed as well;
+    - ``aa``: identical builds, so no improvement is possible; the later stages still run as
+      a check of the harness;
+    - ``closed``: anything else. The session is decided from the quality evidence alone.
+    """
+    blocking = sorted(
+        r["id"]
+        for r in records
+        if r["kind"] != "improvement" and r["result"] not in {"passed", "not_evaluated"}
+    )
+    if "harness/roundtrip" not in {r["id"] for r in records}:
+        blocking.insert(0, "harness/roundtrip (missing)")
+    improvements = [r for r in records if r["kind"] == "improvement"]
+    if blocking:
+        more = f" and {len(blocking) - 5} more" if len(blocking) > 5 else ""
+        shown = ", ".join(blocking[:5]) + more
+        return "closed", f"quality checks did not pass: {shown}"
+    if improvements and all(r["result"] == "passed" for r in improvements):
+        return "improved", "quality improved with every quality check passing"
+    if same_build(builds):
+        return "aa", "identical builds (A/A): later stages run as a harness check"
+    unresolved = [r["id"] for r in improvements if r["result"] != "failed"]
+    if unresolved:
+        return "closed", "improvement unresolved: " + ", ".join(unresolved)
+    return "closed", "no improvement"
+
+
+def stage_coverage(run, cases, observations, clifford, prefix):
+    """``*1/stage-coverage``: every scored case has verified coverage of the changed stages.
+
+    It combines the quality checks (C0, C6, C1-lite) with the C7 Clifford checks, so
+    ``decide`` computes it once both the quality and correctness stages are complete.
+    """
+    quality = [r for r in observations if r["seed_block"] == "B0"]
+    coverage = []
+    for case in cases:
+        if case["role"] != "scored":
+            continue
+        checks = [
+            c
+            for r in quality
+            if r["case_id"] == case["case_id"] and r["revision"] == "evolved"
+            for c in r["checks"]
+        ]
+        checks.extend(
+            c
+            for c in clifford
+            if c.get("case_id") == case["case_id"] and c.get("revision") == "evolved"
+        )
+        scope = run["scope"][str(case["optimization_level"])]
+        if not covered(case, checks, scope):
+            coverage.append(case["case_id"])
+    return record(
+        f"{prefix}1/stage-coverage",
+        "correctness",
+        "unresolved" if coverage else "passed",
+        cases=coverage,
+    )
+
+
+def worker_count():
+    """Concurrency for correctness jobs; never used for timing or memory measurement.
+
+    On LSF, the slots granted to the job (``LSB_DJOB_NUMPROC``); otherwise one less than the
+    CPU count, at most 12.
+    """
+    granted = os.environ.get("LSB_DJOB_NUMPROC", "")
+    if granted.isdigit() and int(granted) > 0:
+        return int(granted)
+    return max(1, min(12, (os.cpu_count() or 2) - 1))
+
+
+def quality_cases(manifest):
+    return [c for c in manifest["cases"] if c["role"] not in {"timing", "memory"}]
+
+
+def profile_prefix(profile):
+    return "CA" if profile == "confirm-profile" else "IA"
+
+
+def harness_wheel(directory):
+    found = sorted((Path(directory) / "harness-wheel").glob("*.whl"))
+    return found[0] if found else None
+
+
 class Comparison:
-    def __init__(
-        self,
-        baseline,
-        evolved,
-        profile="iterations-profile",
-        results_root="results",
-        resume=None,
-        change_scope=(),
-        progress=print,
-    ):
-        self.root = Path(results_root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
+    """One stage's view of a session directory (see the module docstring)."""
+
+    def _setup(self, results_root, stage, profile):
+        self.directory = Path(results_root).resolve()
+        self.stage = stage
         self.data = data_root()
         self.fixtures = self.data / "fixtures"
-        self.manifest, self.policy, hashes = load_profile(profile, self.data, verify=False)
-        self.prefix = "CA" if profile == "confirm-profile" else "IA"
+        self.manifest, self.policy, self.hashes = load_profile(profile, self.data, verify=False)
+        self.prefix = profile_prefix(profile)
         self.records = []
-        self.declaration = change_scope
-        if resume:
-            self.directory = Path(resume).resolve()
+        # The host this stage runs on: quality cache keys and cost bundles use it.
+        self.machine = machine_identity()
+
+    @classmethod
+    def create(cls, baseline, evolved, profile, results_root, store, progress=print):
+        """``compile``: create the session's ``run.json``, or resume an unfinished one.
+
+        The caller holds the session locks. A session with other sources, another store or
+        another profile is refused.
+        """
+        self = cls.__new__(cls)
+        self._setup(results_root, "compile", profile)
+        sources = {
+            "baseline": str(Path(baseline).resolve()),
+            "evolved": str(Path(evolved).resolve()),
+        }
+        store = str(Path(store).resolve())
+        if (self.directory / "run.json").exists():
             self.run = read_json(self.directory / "run.json")
-            if self.run["hashes"].get("coordinator") != coordinator_identity():
-                raise HarnessError(
-                    "Resume with the archived harness version; coordinator code changed"
+            wanted = {"sources": sources, "store": store, "profile": profile}
+            found = {key: self.run.get(key) for key in wanted}
+            if found != wanted:
+                changed = ", ".join(k for k in wanted if wanted[k] != found[k])
+                raise Usage(
+                    f"{self.directory} is a session for other inputs ({changed} differ); "
+                    "start a new session with another --results-root"
                 )
-            implementation = implementation_identity()
-            if self.run["hashes"].get("implementation", implementation) != implementation:
-                raise HarnessError("Resume with the archived worker and verifier implementation")
-            if self.run["hashes"]["manifest"] != hashes["manifest"]:
-                raise HarnessError("Resumption requires the original manifest")
-            if self.run["hashes"]["policy"] != hashes["policy"]:
-                raise HarnessError("Resumption requires the original policy")
-            self.records = (
-                read_json(self.directory / "evidence.json")
-                if (self.directory / "evidence.json").exists()
-                else []
-            )
+            self._check_harness()
         else:
-            run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
-            self.directory = self.root / "runs" / run_id
-            self.directory.mkdir(parents=True)
+            self.directory.mkdir(parents=True, exist_ok=True)
             self.run = {
-                "run_id": run_id,
+                "format": "qtb-run/2",
+                "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+                + "-"
+                + uuid.uuid4().hex[:8],
                 "profile": profile,
-                "hashes": hashes,
+                "hashes": dict(self.hashes, coordinator=coordinator_identity()),
                 "created_at": datetime.now(UTC).isoformat(),
-                "results_root": str(self.root),
-                "machine": machine_identity(),
+                "session": str(self.directory),
+                "store": store,
+                "machine": self.machine,
                 "builds": {},
                 "status": "created",
                 "coverage_gaps": self.manifest.get("coverage_gaps", []),
-                "sources": {
-                    "baseline": str(Path(baseline).resolve()),
-                    "evolved": str(Path(evolved or baseline).resolve()),
-                },
+                "sources": sources,
             }
-            self.run["hashes"]["coordinator"] = coordinator_identity()
             write_json(self.directory / "manifest.json", self.manifest)
             write_json(self.directory / "policy.json", self.policy)
             self.save()
-        # Timestamped progress and per-step durations, next to report.md.
-        self.progress = RunLog(self.directory / "progress.log", progress)
+        self._open_stage(progress)
+        return self
+
+    @classmethod
+    def open(cls, results_root, stage, progress=print):
+        """Every stage after ``compile``: load the session and check the harness is unchanged."""
+        directory = Path(results_root).resolve()
+        if not (directory / "run.json").exists():
+            raise Precondition(f"{directory} is not a session; run compile first")
+        run = read_json(directory / "run.json")
+        self = cls.__new__(cls)
+        self._setup(directory, stage, run["profile"])
+        self.run = run
+        self._check_harness()
+        self._open_stage(progress)
+        return self
+
+    def _check_harness(self):
+        """A stage runs with the harness that compiled its session, as ``--resume`` did."""
+        wheel = harness_wheel(self.directory)
+        hint = f"; install the archived harness wheel {wheel}" if wheel else ""
+        if self.run["hashes"].get("coordinator") != coordinator_identity():
+            raise Precondition(f"Harness code changed since compile{hint}")
+        implementation = self.run["hashes"].get("implementation")
+        if implementation is not None and implementation != implementation_identity():
+            raise Precondition(f"Worker or verifier code changed since compile{hint}")
+        if self.run["hashes"]["manifest"] != self.hashes["manifest"]:
+            raise Precondition(f"The profile's manifest changed since compile{hint}")
+        if self.run["hashes"]["policy"] != self.hashes["policy"]:
+            raise Precondition(f"The profile's policy changed since compile{hint}")
+
+    def _open_stage(self, progress):
+        self.stage_dir = self.directory / "stages" / self.stage
+        self.stage_dir.mkdir(parents=True, exist_ok=True)
+        path = self.stage_dir / "evidence.json"
+        # A retry starts without the crash record of the attempt it resumes.
+        self.records = [
+            r
+            for r in (read_json(path) if path.exists() else [])
+            if r["id"] != f"harness/error/{self.stage}"
+        ]
+        self.store = Store(self.run["store"]) if self.run.get("store") else None
+        self.progress = RunLog(self.stage_dir / "progress.log", progress)
 
     def save(self):
+        """``run.json`` has one writer: the compile stage."""
+        if getattr(self, "stage", "compile") != "compile":
+            raise HarnessError("Only the compile stage writes run.json")
         write_json(self.directory / "run.json", self.run)
+
+    @property
+    def evidence_path(self):
+        return self.directory / "stages" / self.stage / "evidence.json"
 
     def evidence(self, row):
         # Repeated phases replace an earlier unresolved aggregate, never duplicate IDs.
         self.records = [r for r in self.records if r["id"] != row["id"]] + [row]
-        write_json(self.directory / "evidence.json", self.records)
+        write_json(self.evidence_path, self.records)
 
-    def build(self, need_evolved=True):
+    def reset_evidence(self):
+        self.records = []
+        write_json(self.evidence_path, self.records)
+
+    def committed(self, *stages):
+        """Evidence of other stages that ended ``complete``; never partial evidence."""
+        from qtb.coordinator.stages import committed_evidence
+
+        return [row for stage in stages for row in committed_evidence(self.directory, stage)]
+
+    def build(self):
         with locked(runner_lock(), shared=True):
-            return self._build(need_evolved)
+            return self._build()
 
-    def _build(self, need_evolved=True):
+    def _build(self):
         load_profile(self.run["profile"], self.data, verify=True)
         build_root = self.directory / "builds"
         build_root.mkdir(exist_ok=True)
@@ -208,8 +372,7 @@ class Comparison:
                 )
         self.run["changed_paths"] = diff_snapshots(snapshots["baseline"], snapshots["evolved"])
         self.run["scope"] = {
-            str(level): changed_scope(self.run["changed_paths"], level, self.declaration)
-            for level in range(4)
+            str(level): changed_scope(self.run["changed_paths"], level) for level in range(4)
         }
         self.progress(f"Scope: {self.run['scope']}")
         # Build the harness wheel once; its content hash enters observation cache keys.
@@ -237,55 +400,62 @@ class Comparison:
         self.run["hashes"]["harness"] = file_hash(found[0])
         self.run["hashes"]["implementation"] = implementation_identity()
         toolchain = baseline_toolchain(snapshots["baseline"])
-        revisions = ["baseline"] + (["evolved"] if need_evolved else [])
+        envs = self.data / "envs"
+        with step(self, "Resolve build identities"):
+            identities = {
+                revision: build_identity(snapshots[revision], envs, toolchain)
+                for revision in ("baseline", "evolved")
+            }
         pending = []
-        for revision in revisions:
-            directory = build_root / f"{revision}-build"
-            if (directory / "build.json").exists():
-                build = read_json(directory / "build.json")
-                verify_build(build)
-                if build["snapshot"]["tree_hash"] != snapshots[revision]["tree_hash"]:
-                    raise HarnessError("Saved build does not match the source snapshot")
-                self.run["builds"][revision] = build
-                self.save()
-                self.progress(f"Reusing the saved {revision} build.")
-                continue
+        directory = build_root / "evolved-build"
+        if (directory / "build.json").exists():
+            build = read_json(directory / "build.json")
+            verify_build(build)
+            if build["snapshot"]["tree_hash"] != snapshots["evolved"]["tree_hash"]:
+                raise HarnessError("Saved build does not match the source snapshot")
+            self.run["builds"]["evolved"] = build
+            self.save()
+            self.progress("Reusing the saved evolved build.")
+        else:
             if directory.exists():
                 directory.rename(
                     directory.with_name(directory.name + ".failed-" + uuid.uuid4().hex[:8])
                 )
-            pending.append(revision)
+            pending.append("evolved")
 
-        def compile_revision(revision, level):
-            with step(self, f"{revision} Qiskit build", level):
+        def evolved_build(level):
+            with step(self, "evolved Qiskit build", level):
                 self.progress(
-                    f"Preparing {revision} environment with baseline Rust toolchain {toolchain}."
+                    f"Preparing evolved environment with baseline Rust toolchain {toolchain}."
                 )
-                return build_revision(
-                    snapshots[revision],
-                    build_root / f"{revision}-build",
-                    self.data / "envs",
+                return build_into(
+                    snapshots["evolved"],
+                    directory,
+                    identities["evolved"],
+                    envs,
                     found[0],
                     toolchain,
-                    cache_root=self.root / "build-cache",
-                    cache_slot=revision,
+                    label="evolved",
                     progress=self.progress,
                 )
 
-        # Revisions compile concurrently: the final LTO step of one build leaves
-        # most cores idle. Each has its own directory, CARGO_HOME and target/.
-        # A build that finished is recorded even if the other one fails.
-        with step(self, f"Qiskit builds ({', '.join(pending) or 'none pending'})"):
+        def baseline_build(level):
+            return self.baseline_build(
+                snapshots["baseline"], identities["baseline"], found[0], toolchain, level
+            )
+
+        # Both revisions are prepared concurrently: the final LTO step of one build leaves
+        # most cores idle. Each has its own directory, CARGO_HOME and target/. A build that
+        # finished is recorded even if the other one fails.
+        tasks = {"baseline": baseline_build, **({"evolved": evolved_build} if pending else {})}
+        with step(self, f"Qiskit builds (baseline from the store{', evolved' if pending else ''})"):
             level = depth(self)
-            with ThreadPoolExecutor(max_workers=max(1, len(pending))) as pool:
-                futures = {
-                    revision: pool.submit(compile_revision, revision, level)
-                    for revision in pending
-                }
-        errors = [futures[r].exception() for r in pending if futures[r].exception()]
-        for revision in pending:
-            if futures[revision].exception() is None:
-                self.run["builds"][revision] = futures[revision].result()
+            with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+                futures = {revision: pool.submit(task, level) for revision, task in tasks.items()}
+        errors = [f.exception() for f in futures.values() if f.exception()]
+        for revision, future in futures.items():
+            if future.exception() is None:
+                self.run["builds"][revision] = future.result()
         self.save()
         if errors:
             raise errors[0]
@@ -293,6 +463,47 @@ class Comparison:
             self.build_verifier(found[0])
         self.run["status"] = "built"
         self.save()
+
+    def baseline_build(self, snapshot_info, identity, wheel, toolchain, level=0):
+        """The baseline build from the store, building it there on a miss.
+
+        The key covers the build identity and the harness wheel installed in the venv. A
+        directory without ``READY`` is an interrupted build; it is rebuilt under the key's
+        lock at the same, final path, because a virtual environment cannot be moved.
+        """
+        key = build_key(identity, self.run["hashes"]["harness"])
+        reused = True
+        build = self.store.ready_build(key)
+        if build is None:
+            with locked(self.store.build_lock(key)):
+                build = self.store.ready_build(key)
+                if build is None:
+                    reused = False
+                    entry = self.store.build_dir(key)
+                    if entry.exists():
+                        self.progress(f"Repairing the interrupted baseline build {key[:12]}.")
+                        shutil.rmtree(entry)
+                    with step(self, "baseline Qiskit build (into the store)", level):
+                        self.progress(
+                            f"Building baseline {key[:12]} into the store with "
+                            f"Rust toolchain {toolchain}."
+                        )
+                        build = build_into(
+                            snapshot_info,
+                            entry,
+                            identity,
+                            self.data / "envs",
+                            wheel,
+                            toolchain,
+                            wheel_cache=self.store.wheels,
+                            label="baseline",
+                            progress=self.progress,
+                        )
+                    atomic_bytes(entry / "READY", (datetime.now(UTC).isoformat() + "\n").encode())
+        if reused:
+            self.progress(f"Reusing baseline build {key} from the store.")
+        verify_build(build)
+        return dict(build, store_key=key, reused=reused)
 
     def build_verifier(self, wheel):
         directory = self.directory / "verifier"
@@ -373,7 +584,7 @@ class Comparison:
     @property
     def workers(self):
         """Concurrency for correctness jobs; never used for timing or memory measurement."""
-        return max(1, min(12, (os.cpu_count() or 2) - 1))
+        return worker_count()
 
     def jobs(self, specs):
         """Run independent ``job`` specs concurrently; results keep the order of ``specs``."""
@@ -401,8 +612,8 @@ class Comparison:
 
         The verifier is a pure function of its job, so results are keyed by content: the
         output, reference and target file hashes plus the oracle options. A seed or revision
-        that reproduces an output already verified, in this run or an earlier one, reuses that
-        result. Only decisive results (verified or mismatch) are cached.
+        that reproduces an output already verified in this session, by any stage, reuses that
+        result. Only decisive results (verified or mismatch) are cached; writes are atomic.
         """
         if not requests:
             return []
@@ -431,12 +642,17 @@ class Comparison:
             }
             jobs.append(job)
             keys.append(digest({"verifier": identity, "job": content}))
-        cache = self.root / "verifier-cache"
+        cache = self.directory / "verifier-cache"
         results = {}
         for key in set(keys):
             path = cache / key[:2] / f"{key}.json"
             if path.exists():
-                results[key] = dict(read_json(path), cached=True)
+                try:
+                    cached = read_json(path)
+                except HarnessError:
+                    continue
+                if cached.get("status") in {"verified", "mismatch"}:
+                    results[key] = dict(cached, cached=True)
         pending = {}
         for key, job in zip(keys, jobs, strict=True):
             if key not in results:
@@ -493,15 +709,25 @@ class Comparison:
                     merged.update(results)
         return merged
 
-    def quality(self, cases, smoke=False, revisions=("baseline", "evolved")):
-        block = "B0"
-        builds = self.run["builds"]
-        independent_aa = (
-            "baseline" in builds
-            and "evolved" in builds
-            and builds["baseline"]["id"] == builds["evolved"]["id"]
+    def baseline_quality_key(self, case):
+        """Store key of the baseline quality rows for ``case`` on this stage's host."""
+        return quality_cache_key(
+            self.run["builds"]["baseline"],
+            case,
+            self.machine,
+            self.policy["measurement_protocol"],
+            self.run["hashes"]["implementation"],
         )
-        use_cache = not smoke and not independent_aa
+
+    def quality(self, cases, revisions=("baseline", "evolved")):
+        """Compile every quality seed with its C0, C6 and C1-lite checks.
+
+        Baseline rows come from the store when present; fresh baseline rows are added to it.
+        Evolved rows are never stored. An A/A session bypasses the stored rows, so it stays
+        an independent check. Seeds already in ``observations.jsonl`` are not redone.
+        """
+        block = "B0"
+        use_store = self.store is not None and not same_build(self.run["builds"])
         saved = read_records(self.directory / "observations.jsonl")
         completed = {(r["case_id"], r["revision"], r["seed"], r["seed_block"]) for r in saved}
         batch_size = self.policy["measurement_protocol"]["quality_batch_size"]
@@ -509,21 +735,22 @@ class Comparison:
         for revision in revisions:
             for case in cases:
                 target = read_json(self.fixtures / case["target"]["file"])
-                count = 1 if smoke else case["seeds_per_block"]
                 seeds = [
                     s
-                    for s in range(count)
+                    for s in range(case["seeds_per_block"])
                     if (case["case_id"], revision, s, block) not in completed
                 ]
-                key = quality_cache_key(
-                    self.run["builds"][revision],
-                    case,
-                    self.run["machine"],
-                    self.policy["measurement_protocol"],
-                    self.run["hashes"]["implementation"],
-                )
-                cache = self.root / "quality-cache" / key
-                if use_cache:
+                cache = key = None
+                if revision == "baseline" and use_store:
+                    key = self.baseline_quality_key(case)
+                    cache = self.store.quality_dir(key)
+                    if not quality_entry_valid(cache):
+                        self.progress(
+                            f"Stored baseline quality {key[:12]} was invalidated by a failed "
+                            f"determinism audit; recomputing {case['case_id']}."
+                        )
+                        cache = None
+                if cache is not None:
                     remaining = []
                     for seed in seeds:
                         path = cache / f"{seed}.json"
@@ -533,6 +760,7 @@ class Comparison:
                                 cached.update(
                                     revision=revision,
                                     cached=True,
+                                    cached_from=key,
                                     case_id=case["case_id"],
                                     case_hash=case_hash(case),
                                 )
@@ -563,7 +791,7 @@ class Comparison:
         pool = ThreadPoolExecutor(max_workers=workers)
         try:
             futures = [
-                pool.submit(self.quality_batch, revision, case, target, batch, smoke)
+                pool.submit(self.quality_batch, revision, case, target, batch)
                 for revision, case, target, batch, _ in tasks
             ]
             # Batches compile concurrently but are committed in plan order, so
@@ -593,8 +821,8 @@ class Comparison:
                             )
                         )
                     append_record(self.directory / "observations.jsonl", observation)
-                    if result["status"] == "ok" and use_cache:
-                        cache_quality_observation(cache, result["seed"], observation)
+                    if result["status"] == "ok" and cache is not None:
+                        store_quality_observation(cache, result["seed"], observation)
                 failed = sum(result["status"] != "ok" for _, result in finished)
                 self.progress(
                     f"Quality batch {number}/{len(tasks)}: {revision} {case['case_id']} "
@@ -606,7 +834,7 @@ class Comparison:
             pool.shutdown(wait=True, cancel_futures=True)
         return read_records(self.directory / "observations.jsonl")
 
-    def quality_batch(self, revision, case, target, batch, smoke=False):
+    def quality_batch(self, revision, case, target, batch):
         """Compile and check one seed batch; runs on a pool thread, so it records nothing.
 
         Returns the (observation, worker result) pairs, the C1-lite requests still to
@@ -617,10 +845,8 @@ class Comparison:
         rows = self.job(revision, case, "quality", batch)
         timings["compile"] = time.monotonic() - started
         started = time.monotonic()
-        prefixes = (
-            self.routing_batch(revision, case, [r["seed"] for r in rows if r["status"] == "ok"])
-            if not smoke
-            else {}
+        prefixes = self.routing_batch(
+            revision, case, [r["seed"] for r in rows if r["status"] == "ok"]
         )
         timings["routing prefixes"] = time.monotonic() - started
         started = time.monotonic()
@@ -671,7 +897,7 @@ class Comparison:
                     free_parameters=result.get("free_parameters", []),
                 )
                 observation["checks"].append(dict(structural, oracle="C0"))
-                if not smoke and structural["status"] == "verified":
+                if structural["status"] == "verified":
                     self.check_routing(revision, case, observation, prefixes)
                     if (
                         self.run["profile"] == "confirm-profile"
@@ -790,12 +1016,14 @@ class Comparison:
             ):
                 ok = False
         self.evidence(record("audit/determinism", "completeness", "passed" if ok else "unresolved"))
-        if not ok:
-            # A cache namespace cannot remain reusable after a failed determinism audit.
-            for path in (self.root / "quality-cache").glob("*/[0-9]*.json"):
-                row = read_json(path)
-                if row["build_id"] in {b["id"] for b in self.run["builds"].values()}:
-                    path.unlink()
+        if not ok and self.store is not None and "baseline" in revisions:
+            # Stored baseline rows cannot remain reusable after a failed determinism audit.
+            # Correctness and unit-test entries stay: the audit did not test them.
+            for case in cases:
+                invalidate_quality_entry(
+                    self.store.quality_dir(self.baseline_quality_key(case)),
+                    f"Determinism audit failed in session {self.directory}",
+                )
 
     def aggregate_checks(self, cases, observations):
         quality = [r for r in observations if r["seed_block"] == "B0"]
@@ -876,183 +1104,3 @@ class Comparison:
                 else "unresolved"
             )
             self.evidence(record(f"{self.prefix}1/{oracle}", "correctness", status))
-        by_case = {c["case_id"]: c for c in cases}
-        clifford = read_records(self.directory / "clifford.jsonl")
-        coverage = []
-        for case in cases:
-            if case["role"] != "scored":
-                continue
-            checks = [
-                c
-                for r in quality
-                if r["case_id"] == case["case_id"] and r["revision"] == "evolved"
-                for c in r["checks"]
-            ]
-            checks.extend(
-                c
-                for c in clifford
-                if c.get("case_id") == case["case_id"] and c.get("revision") == "evolved"
-            )
-            scope = self.run["scope"][str(case["optimization_level"])]
-            if not covered(by_case[case["case_id"]], checks, scope):
-                coverage.append(case["case_id"])
-        self.evidence(
-            record(
-                f"{self.prefix}1/stage-coverage",
-                "correctness",
-                "unresolved" if coverage else "passed",
-                cases=coverage,
-            )
-        )
-
-    def finish(self):
-        with step(self, "Evaluate and write report"):
-            decision = self._finish()
-        self.summarize()
-        return decision
-
-    def summarize(self):
-        """Append the table of step durations to progress.log."""
-        summary = getattr(self.progress, "summary", None)
-        if summary:
-            summary()
-
-    def _finish(self):
-        from qtb.coordinator.costs import replay_costs, required_cost_panels
-
-        self.records = replay_costs(
-            self.directory, self.run, self.manifest, self.policy, self.records
-        )
-        rows = read_records(self.directory / "observations.jsonl")
-        self.run["decisions_before"] = register_decision(
-            self.root, self.run["hashes"]["manifest"], self.run["run_id"]
-        )
-        records, required, summaries = evaluate_quality(
-            self.manifest, self.policy, rows, self.records
-        )
-        if "scope" in self.run:
-            required = sorted(
-                set(required) | {f"{self.prefix}5/{name}" for name in required_cost_panels(self)}
-            )
-        decision = make_decision(
-            self.run, records, required, summaries, rows, self.manifest, self.policy
-        )
-        self.run["status"] = "complete"
-        self.save()
-        write_json(self.directory / "evidence.json", self.records)
-        write_report(self.directory, decision)
-        if decision["status"] in {"PASS", "NO_IMPROVEMENT"}:
-            limit = self.policy["measurement_protocol"]["output_retention_bytes"]
-            prune_outputs(self.directory, rows, limit)
-            prune_prefix_outputs(self.directory, rows, limit)
-        return decision
-
-    def execute(self, smoke=False):
-        cases = [c for c in self.manifest["cases"] if c["role"] not in {"timing", "memory"}]
-        self.progress(
-            f"{self.run['profile']}: {len(cases)} quality cases, "
-            f"{sum(c['seeds_per_block'] for c in cases)} compiles per revision before checks."
-        )
-        try:
-            with step(self, "Build"):
-                self.build()
-            with step(self, "Input roundtrip"):
-                self.roundtrip(cases if smoke else self.roundtrip_cases())
-            if not smoke:
-                from qtb.coordinator.checks import behavior_checks, clifford_checks
-                from qtb.coordinator.upstream import upstream_checks
-
-                with step(self, "C1-C5 suite (baseline)"):
-                    behavior_checks(self, revisions=("baseline",))
-                baseline_bad = any(
-                    r["subject"] == "reference" and r["result"] == "failed" for r in self.records
-                )
-                self.evidence(
-                    record(
-                        "baseline/preflight",
-                        "correctness",
-                        "failed" if baseline_bad else "passed",
-                        "reference",
-                    )
-                )
-                if baseline_bad:
-                    return self.finish()
-                with step(self, "C1-C5 suite (evolved)"):
-                    behavior_checks(self, revisions=("evolved",))
-                with step(self, "C7 Clifford variants"):
-                    clifford_checks(self, cases)
-                # Qiskit's own test suite gates acceptance, not every iteration.
-                if self.run["profile"] == "confirm-profile":
-                    with step(self, "Upstream Qiskit tests"):
-                        upstream_checks(self)
-                if any(r["result"] == "failed" for r in self.records):
-                    return self.finish()
-            with step(self, "Quality (C0 + C6 routing replay)"):
-                rows = self.quality(cases, smoke=smoke)
-            if smoke:
-                success = len(rows) == len(cases) * 2 and all(
-                    r.get("checks") and all(c["status"] == "verified" for c in r["checks"])
-                    for r in rows
-                )
-                result = {
-                    "format": "qtb-smoke/1",
-                    "success": success,
-                    "run_id": self.run["run_id"],
-                    "observations": len(rows),
-                }
-                write_json(self.directory / "smoke.json", result)
-                self.summarize()
-                return result
-            with step(self, "Determinism audit"):
-                self.audit(cases, rows)
-            with step(self, "Aggregate checks"):
-                self.aggregate_checks(cases, rows)
-            records, _, _ = evaluate_quality(self.manifest, self.policy, rows, self.records)
-            due = cost_stage_due(self.run["builds"], records)
-            if due:
-                from qtb.coordinator.costs import measure_costs
-
-                if due == "aa":
-                    self.progress("Identical builds: measuring cost panels as an A/A check.")
-                with step(self, "Cost panels (timing/memory)"):
-                    try:
-                        measure_costs(self)
-                    except Incomplete as exc:
-                        self.evidence(
-                            record(
-                                f"{self.prefix}5/timing", "cost", "unresolved", detail=str(exc)
-                            )
-                        )
-            # Qualification is deliberately explicit; local unit-test success alone
-            # cannot assert an inspected controlled-runner acceptance claim.
-            qualification_file = (
-                self.root / "qualifications" / (digest(self.run["hashes"]) + ".json")
-            )
-            qualified = False
-            if qualification_file.exists():
-                qualification = read_json(qualification_file)
-                qualified = (
-                    qualification.get("hashes") == self.run["hashes"]
-                    and qualification.get("known_outcomes_passed") is True
-                    and bool(qualification.get("reviewer"))
-                    and bool(qualification.get("controlled_run"))
-                    and qualification.get("machine") == self.run["machine"]
-                )
-                self.run["qualification"] = qualification
-            self.evidence(
-                record(
-                    "harness/qualification",
-                    "harness",
-                    "passed" if qualified else "unresolved",
-                    detail=self.policy["qualification"]["reason"],
-                )
-            )
-            return self.finish()
-        except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as exc:
-            self.evidence(record("harness/error", "harness", "failed", detail=str(exc)))
-            if smoke:
-                result = {"format": "qtb-smoke/1", "success": False, "error": str(exc)}
-                write_json(self.directory / "smoke.json", result)
-                self.summarize()
-                return result
-            return self.finish()

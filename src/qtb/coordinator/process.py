@@ -46,7 +46,10 @@ def run_worker(build, job, directory, hash_seed="0"):
         process = subprocess.Popen(
             command,
             cwd=scratch,
-            env=sanitized_environment({"PYTHONHASHSEED": hash_seed}),
+            # A stored baseline build is shared and immutable: never write bytecode into it.
+            env=sanitized_environment(
+                {"PYTHONHASHSEED": hash_seed, "PYTHONDONTWRITEBYTECODE": "1"}
+            ),
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,

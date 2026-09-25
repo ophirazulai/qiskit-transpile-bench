@@ -1,7 +1,4 @@
-from types import SimpleNamespace
-
-from qtb.coordinator import Comparison
-from qtb.coordinator.storage import append_record
+from qtb.coordinator import stage_coverage
 from qtb.evaluator.scope import covered
 
 
@@ -54,7 +51,7 @@ def test_c7_variant_contract_and_substitution_are_enforced():
     assert not covered(case, [prefix], {"stages": ["optimization"], "components": []})
 
 
-def test_aggregate_stage_coverage_reads_c7_results(tmp_path):
+def test_stage_coverage_reads_c7_results():
     case = _case()
     observations = [
         {
@@ -68,22 +65,12 @@ def test_aggregate_stage_coverage_reads_c7_results(tmp_path):
         }
         for revision in ("baseline", "evolved")
     ]
-    records = []
-    comparison = SimpleNamespace(
-        directory=tmp_path,
-        run={
-            "profile": "iterations-profile",
-            "scope": {"1": {"stages": ["optimization"], "components": []}},
-        },
-        prefix="IA",
-        evidence=records.append,
-    )
+    run = {"scope": {"1": {"stages": ["optimization"], "components": []}}}
 
-    Comparison.aggregate_checks(comparison, [case], observations)
-    assert records[-1]["result"] == "unresolved"
+    # decide computes it once quality and correctness are both complete.
+    result = stage_coverage(run, [case], observations, [], "IA")
+    assert result["id"] == "IA1/stage-coverage"
+    assert result["result"] == "unresolved"
 
-    append_record(tmp_path / "clifford.jsonl", _c7())
-    records.clear()
-    Comparison.aggregate_checks(comparison, [case], observations)
-    assert records[-1]["id"] == "IA1/stage-coverage"
-    assert records[-1]["result"] == "passed"
+    result = stage_coverage(run, [case], observations, [_c7()], "IA")
+    assert result["result"] == "passed"

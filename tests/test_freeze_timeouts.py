@@ -20,7 +20,6 @@ def test_freeze_uses_slowest_baseline_seed_and_requires_multiplier():
     module = freeze_module()
     manifest = {
         "version": 1,
-        "status": "unqualified",
         "cases": [
             {"case_id": "normal", "role": "scored", "seeds_per_block": 2, "timeout_s": 120},
             {
@@ -71,5 +70,6 @@ def test_freeze_uses_slowest_baseline_seed_and_requires_multiplier():
     narrowed = dict(full_manifest, cases=[multiplier])
     frozen = module.freeze(narrowed, expected, source_hash="a" * 64)
     assert frozen["version"] == full_manifest["version"] + 1
+    assert "status" not in frozen
     assert frozen["cases"][0]["timeout_s"] == 140
     assert full_manifest["cases"] != frozen["cases"]

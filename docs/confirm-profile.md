@@ -5,17 +5,28 @@
 three circuits you tuned on.
 
 ```bash
-uv run qiskit-transpile-bench compare --baseline /path/to/baseline --evolved /path/to/evolved \
-    --profile confirm-profile
+Q="uv run qiskit-transpile-bench"
+S="$HOME/qtb-sessions/idea1-confirm"   # a new session directory
+
+$Q compile     --baseline /path/to/baseline --evolved /path/to/evolved \
+               --profile confirm-profile --store "$HOME/qtb-store" --results-root "$S"
+$Q quality     --results-root "$S"
+$Q correctness --results-root "$S"      # skipped unless the quality gate is open
+$Q unit-tests  --results-root "$S"      # optional; if you run it, it counts
+$Q cost        --results-root "$S"      # skipped unless correctness also passed
+$Q decide      --results-root "$S"
 ```
 
+The profile is chosen once, on `compile`; the later stages read it from the session. See the
+[README](../README.md) for the stages, the store and the exit codes.
+
 Files: `profiles/confirm-profile/manifest.json` and `profiles/confirm-profile/policy.json`.
-Version 1, marked `unqualified`.
+Version 5.
 
 > **Do not tune on this profile.** The workload is public and fixed, with no held-back part.
 > Editing a candidate and rerunning confirm until it passes turns it into a second tuning
-> loop. Every report prints how many decisions the results root already holds for this
-> manifest, so overuse is visible.
+> loop. The harness does not count how often a workload has been decided, so keeping to
+> this is up to you.
 
 ## What a `PASS` claims
 
@@ -112,12 +123,26 @@ three-circuit iterations score to improve.
 
 | Rule | Records | Requirement |
 | --- | --- | --- |
-| CA1 correctness | `CA1/C0`, `CA1/C1-C5`, `CA1/C6`, `CA1/C7`, `CA1/C1-lite`, `CA1/upstream`, `CA1/stage-coverage` | As IA1, plus **C1-lite**: exact all-zero-input state or measurement checks on the first 10 seeds of every scored case with at most 25 logical qubits and no free parameters. An output whose simulated wire union exceeds 25 is recorded as `unverified` |
+| CA1 correctness | `CA1/C0`, `CA1/C1-C5`, `CA1/C6`, `CA1/C7`, `CA1/C1-lite`, `CA1/stage-coverage`, and `CA1/upstream` once `unit-tests` has started | As IA1, plus **C1-lite**: exact all-zero-input state or measurement checks on the first 10 seeds of every scored case with at most 25 logical qubits and no free parameters. An output whose simulated wire union exceeds 25 is recorded as `unverified` |
 | CA2 improvement | `CA2/improvement` | `ln(D2 score) + 2·SE < ln(0.99)`, a practical 1% reduction beyond seed noise |
 | CA3 breadth | `CA3/breadth` | At least 4 of the 8 families individually satisfy `ln(D2) + 2·SE < 0`, **and** removing any one family still leaves the score below 1 |
 | CA4 guards | `CA3/primary/N2`, `CA3/cx/*`, `CA3/ecr/*`, `CA4/family/<G>/<metric>`, `CA4/optimization_level/<L>/<metric>`, `CA4/cap/...`, `CA4/exact/...` | Every family and level summary has `ln(score) ≤ 3·SE` for `D2` and `N2`, and so does overall `N2`. Per-case caps (1.05). Deterministic, zero-baseline and canary cases exact. Band, topology and basis summaries are reported only |
 | CA5 cost | `CA5/timing`, `CA5/timing-basis`, `CA5/confirm-timing`, `CA5/memory`, `CA5/preset`, `CA5/companion` | Each panel's ratio at most 1.03, and no per-case breach (> 10% and by more than 25 ms, or 32 MiB for memory). Timing panels screen with 4 rounds and measure 10 in full ([iterations-profile.md](iterations-profile.md#timing-panels)) |
 | CA6 completeness | `CA6/completeness` | Every observation present; determinism audit passed |
+
+Required IDs in `policy.json`: `harness/roundtrip`, `baseline/preflight`,
+`audit/determinism`, `CA1/C0`, `CA1/C1-C5`, `CA1/C6`, `CA1/C7`, `CA1/stage-coverage`,
+`CA2/improvement`, `CA5/timing`, `CA6/completeness`, `CA3/breadth`, `CA1/C1-lite`,
+`CA5/confirm-timing` and `CA5/memory`. The evaluator adds every guard, cap and exact record it
+creates, and the cost panels the change scope requires.
+
+**Upstream tests are optional.** They belong to the `unit-tests` stage, which you may run or
+leave out ([verifier.md](verifier.md#upstream-tests)). The rule is: if you run it, it counts.
+`CA1/upstream` is not in `policy.json`; `decide` adds it to the required set once
+`unit-tests` has started (running, failed or complete). A regression then gives
+`CONSTRAINT_VIOLATION`, an unfinished or unresolved suite `INCONCLUSIVE`, and a failed stage
+`ERROR`. If the stage never started, or the quality gate skipped it, the verdict is decided
+without it and the report says "Upstream tests: not run."
 
 Report-only numbers:
 
@@ -127,7 +152,6 @@ Report-only numbers:
 - **Leave-iterations-out score**: the score recomputed without `qft_n100`,
   `square_heisenberg_n100` and `qaoa_ba_n100_3reps`. A gain that lives mostly in those three
   circuits improved the tuning loop, not the suite.
-- **Decision count** for this manifest in the results root.
 
 Policy differences from the iterations profile: `practical_ratio` is 0.99 (versus 1.0), and
 the required set adds `CA3/breadth`, `CA1/C1-lite`, `CA5/confirm-timing` and `CA5/memory`.
@@ -148,7 +172,7 @@ From the design probe on an Apple M1 Max, serial:
 | --- | --- |
 | Quality compiles | About 15,000 compiles and 87 CPU-minutes per revision; routing replay roughly doubles this |
 | C1-lite | Provisional; one 23-qubit `ripple_adder_10` check took about 4 minutes in validation |
-| One decision, baseline cached | About 3.5 CPU-hours of quality work for the candidate; twice that the first time a baseline is used |
+| One session, baseline in the store | About 3.5 CPU-hours of quality work for the candidate; twice that the first time a baseline is used |
 | Cost panels | A timing round (36 cases across the `timing`, `preset` and `confirm-timing` panels, one process per arm) is about 5 min on an exclusive machine. Typical: the 4-round screens (about 20 min) plus memory (135 processes, about 15 min), about 35–40 min. Worst: screen + full + rerun = 4 + 10 + 20 = 34 rounds, about 3 h, plus a doubled memory rerun. The `cx`/`ecr` twins add about 10 min when timed, the companion about 10–20 min. Design estimates, not measured runs |
 
 Quality runs up to 9 seed batches at once; the C0/C6 checks in the coordinator remain

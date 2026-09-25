@@ -56,8 +56,10 @@ def _quality_comparison(tmp_path, job):
         fixtures / "target.json", {"num_qubits": 1, "native_2q_names": [], "instructions": []}
     )
     comparison = Comparison.__new__(Comparison)
-    comparison.root = tmp_path
     comparison.directory = run_dir
+    comparison.stage = "quality"
+    comparison.store = None
+    comparison.machine = {}
     comparison.fixtures = fixtures
     comparison.records = []
     comparison.run = {

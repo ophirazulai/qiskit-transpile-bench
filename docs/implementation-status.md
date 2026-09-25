@@ -1,9 +1,10 @@
-# Implementation and qualification
+# Implementation and validation
 
 The implementation originated from `design/transpilation-benchmark-impl-plan.md`; the
-README describes the current CLI. Both profiles
-are version 2 and deliberately marked unqualified. A successful smoke test is not benchmark
-qualification. Numerical examples and synthetic acceptance-path tests are harness tests,
+README describes the current CLI. Both profiles are version 5. There is no qualification
+step: a session can end `PASS` when every required record passes. Validating the harness on a
+new runner is a practice, described below, not a required record. A successful `compile` is
+not a validation. Numerical examples and synthetic acceptance-path tests are harness tests,
 not measurements of an evolved Qiskit revision.
 
 ## Implemented components
@@ -19,9 +20,18 @@ not measurements of an evolved Qiskit revision.
   procedure preserves candidate-failure precedence.
 - Fixed policy cost thresholds, fresh two-arm sessions, independent arm IDs, screened and
   doubled-count rerun regimes, and archived bundles replayable from the archived policy.
-- Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable run
-  evidence, wheel and quality caches, determinism audits, and reports generated from
-  quality and cost observations.
+- Snapshot/build/provenance isolation, per-seed worker records and timeouts, durable
+  per-stage evidence, determinism audits, and reports generated from quality and cost
+  observations.
+- Separately runnable stages against one session directory: `compile`, `quality`,
+  `correctness`, optional `unit-tests`, `cost`, `decide` and `clean`. A quality gate runs
+  correctness, unit tests and cost only after an improvement or on an A/A run. Each stage
+  has its own state, evidence, lock and progress log, can run on a different host, and
+  resumes when run again after a failure or interruption. `decide` can be repeated at any
+  time, also after `clean`.
+- A baseline store shared by sessions: baseline builds, wheels, quality observations,
+  correctness results and unit-test results, each under a content key. Stored builds are
+  never modified, and a failed determinism audit invalidates the stored baseline quality.
 - Trusted dense, statevector, terminal-measurement, dynamic-branching, Clifford, and schedule
   oracles; a frozen 480-configuration C1–C5 fixture suite; coherent-control phase checks;
   worker API contracts and negative configuration checks.
@@ -29,18 +39,19 @@ not measurements of an evolved Qiskit revision.
   Clifford variants, explicit license/provenance records, and reproducible curation tools.
 - C1-lite eligibility based on the reference/output union, and binding baseline-owned test
   execution.
-- One-pass structural metrics/hash/legality, successful-output pruning above 8 MB,
+- One-pass structural metrics/hash/legality, `clean` pruning of verified outputs above 8 MB,
   runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
 
 ## Implementation validation (2026-09-24)
 
 - All 86 automated tests pass; repository-wide Ruff and whitespace checks pass.
-- A native smoke run built two isolated release wheels from local Qiskit revision
+- A native run of the former `smoke` command (removed; `compile` now does the builds and the
+  round-trip) built two isolated release wheels from local Qiskit revision
   `c062c2dfd240b23157fbfcf6184e8998a9c8b343` (2.6.0.dev0) and completed all 24 quality
-  observations: 12 iteration cases in each build. Smoke does not produce a benchmark verdict.
+  observations: 12 iteration cases in each build. It did not produce a benchmark verdict.
 - All 120 level-2 behavioral fixture configurations passed against the pinned 2.5.2
-  worker/verifier setup. Other levels are exercised by the full qualification suite.
+  worker/verifier setup. Other levels are exercised by the full correctness suite.
 - With the native 2.6.0.dev0 worker, all three 100-qubit Clifford prefixes verified. The full
   Heisenberg variant also verified; the full QFT and QAOA variants remained unverified
   because their compiled outputs contained non-Clifford rotations.
@@ -52,34 +63,37 @@ not measurements of an evolved Qiskit revision.
 
 Local evidence is under `results/validation/summary.json`, `results/smoke-validation/`,
 and `results/compatibility-validation/`. These checks establish implementation behavior;
-they do not qualify a controlled runner or demonstrate a candidate improvement.
+they do not validate a runner or demonstrate a candidate improvement.
 
-## Qualification work that requires a runner and review
+## Validation on a new runner
 
-1. Run both builds, the complete correctness suite, B0 quality collection, one A/A `compare`
-   to check the fixed cost thresholds against the runner's own drift, and the known-outcome
-   mutations on the intended runner. Review
-   every proposed deterministic/canary role against the measured baseline; draft probe facts
-   are not sufficient. The replacement reversible circuits require fresh measurements.
-   Before qualification, use `tools/freeze_timeouts.py measure` against the baseline build
-   and `freeze` to draft version-bumped manifests. The tool requires measured compiles for
-   every case and seed, including `multiplier_h18_n20`; the shipped version-2 profiles
-   still carry provisional 120-second timeouts.
+Nothing in the harness enforces these steps or records that they were done. They are how to
+find out whether a `PASS` on a given runner can be trusted.
+
+1. Run one A/A session (the same source as `--baseline` and `--evolved`) through every stage
+   on the intended runner: both builds, B0 quality collection, the complete correctness
+   suite, and the cost panels, which check the fixed cost thresholds against the runner's own
+   drift. Run the known-outcome mutations
+   ([known-outcome-validation.md](known-outcome-validation.md)). Review every proposed
+   deterministic/canary role against the measured baseline; draft probe facts are not
+   sufficient. The replacement reversible circuits require fresh measurements.
+   Use `tools/freeze_timeouts.py measure` against the baseline build and `freeze` to draft
+   version-bumped manifests. The tool requires measured compiles for every case and seed,
+   including `multiplier_h18_n20`; the shipped version-5 profiles still carry provisional
+   120-second timeouts.
 2. Investigate binding upstream Python and Rust test failures independently of score changes.
-   The comparison runs these tests directly, without an exclusion list.
-3. Qualify the corrected C1-lite measurement oracle on the output/reference union, including
+   The optional `unit-tests` stage runs these tests directly, without an exclusion list, and
+   once started they bind the verdict.
+3. Validate the corrected C1-lite measurement oracle on the output/reference union, including
    the larger eligible `ripple_adder_10` case, and inspect the actual coverage and runtime.
-4. Inspect a complete real comparison and create a qualification record under
-   `RESULTS_ROOT/qualifications/HASH.json`, where HASH is the canonical SHA-256 of the run's
-   `hashes` object. It must contain matching `hashes`, matching `machine`, a named `reviewer`,
-   a `controlled_run` evidence reference, and `known_outcomes_passed: true`. This is a
-   maintainer attestation, not a command-line switch to skip measurements. Every other
-   required record still has to pass.
+4. Inspect a complete real session (`report.md`, `decision.json` and the stage states under
+   `stages/`) before relying on its verdict.
 
-## Current limitations to resolve before qualification
+## Current limitations
 
-- The full controlled-runner qualification and manual evidence inspection have not been
-  performed by this implementation task. Neither profile should be presented as qualified.
+- The runner validation above and manual evidence inspection have not been performed by this
+  implementation task. A `PASS` is reachable, but no runner has been checked against known
+  outcomes.
 - The adapter intentionally refuses unknown operations and unsupported expression/control-flow
   forms. It does not silently decompose high-level inputs to make a revision compatible.
   Angle-bound targets use an explicit, checked Qiskit state adapter because 2.5.2 has no
@@ -88,14 +102,17 @@ they do not qualify a controlled runner or demonstrate a candidate improvement.
   its two routing prefixes). Input roundtrip and the determinism audit also run concurrently.
   The C0/C6 checks of each batch run in the coordinator process and are bound by the GIL.
   Runtime and memory budgets still need measurement on the intended controlled runner.
-- Automatic pruning keeps failing and inconclusive runs intact for investigation. Successful
-  large outputs are pruned with a hash/observation retention record. Pinned dependency
-  downloads are required when they are absent from the local package cache.
+- Sessions are not pruned automatically, apart from the Rust `target/` directories of each
+  build and test run. `clean` removes a decided session's builds,
+  verifier, caches and test copies, and replaces verified outputs above 8 MB with a hash
+  record in `clean.json`; failing and unverified outputs are kept. The baseline store is
+  maintained by hand. Pinned dependency downloads are required when they are absent from the
+  local package cache.
 - The candidate's own Python tests are report-only, while the baseline's tests bind the
-  comparison.
+  verdict once `unit-tests` has started.
 - CI currently verifies the adapter on Qiskit 2.5.2. The trusted verifier stays pinned to that
   version. Additional source revisions must complete round trips and the correctness suite
-  before they can participate in a qualified comparison.
+  before their results can be trusted.
 
 ## Fixture substitutions
 

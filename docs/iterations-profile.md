@@ -6,12 +6,22 @@ noise. When a change looks good here, confirm it once with the broader
 [confirm profile](confirm-profile.md).
 
 ```bash
-uv run qiskit-transpile-bench compare --baseline /path/to/baseline --evolved /path/to/evolved
+Q="uv run qiskit-transpile-bench"
+S="$HOME/qtb-sessions/idea1"            # a new session directory
+
+$Q compile     --baseline /path/to/baseline --evolved /path/to/evolved \
+               --store "$HOME/qtb-store" --results-root "$S"
+$Q quality     --results-root "$S"
+$Q correctness --results-root "$S"      # skipped unless the quality gate is open
+$Q cost        --results-root "$S"      # skipped unless correctness also passed
+$Q decide      --results-root "$S"
 ```
+
+See the [README](../README.md) for the stages, the store and the exit codes.
 
 Files: `profiles/iterations-profile/manifest.json` (the workload) and
 `profiles/iterations-profile/policy.json` (thresholds and measurement protocol). Both are
-version 1 and marked `unqualified`.
+version 5.
 
 ## What it asks
 
@@ -116,22 +126,25 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 
 | Rule | Constraint record IDs | Requirement |
 | --- | --- | --- |
-| IA1 correctness | `IA1/C0`, `IA1/C1-C5`, `IA1/C6`, `IA1/C7`, `IA1/stage-coverage` | Every output is legal (C0). The C1–C5 suite passes for both revisions. Routing replay verifies every scored and basis-guard output. Clifford variants verify on 3 seeds. Every changed stage is covered by a verified check. Upstream tests run only in the confirm profile |
+| IA1 correctness | `IA1/C0`, `IA1/C1-C5`, `IA1/C6`, `IA1/C7`, `IA1/stage-coverage` | Every output is legal (C0). The C1–C5 suite passes for both revisions. Routing replay verifies every scored and basis-guard output. Clifford variants verify on 3 seeds. Every changed stage is covered by a verified check. Upstream tests are optional: if the `unit-tests` stage has started, `IA1/upstream` is required too |
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
 | IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel time ratio at most 1.03, and no per-case breach (> 10% slower and by more than 25 ms) |
 | IA6 completeness | `IA6/completeness` | All 2 × (9 × 100 + 3 × 10) observations are present. Determinism audit passed |
 
-Also required: `harness/roundtrip`, `harness/qualification`, `baseline/preflight`,
-`audit/determinism`.
+Required IDs in `policy.json`: `harness/roundtrip`, `baseline/preflight`,
+`audit/determinism`, `IA1/C0`, `IA1/C1-C5`, `IA1/C6`, `IA1/C7`, `IA1/stage-coverage`,
+`IA2/improvement`, `IA5/timing` and `IA6/completeness`. The evaluator adds every guard, cap
+and canary record it creates, and the cost panels the change scope requires. `decide` adds
+`IA1/upstream` once the optional `unit-tests` stage has started.
 
 Policy values (`policy.json`): improvement multiplier 2.0, guard multiplier 3.0, practical
 ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924.
-The upstream test budgets in the policy are unused here. Timing: 4 screen rounds, 6 full rounds,
-rerun multiplier 2, 1 warm-up, at least 2 timed calls and 1 s per round. Cost thresholds
-(fixed, never calibrated): panel ratio 1.03, case ratio 1.10 above a 25 ms (32 MiB) floor,
-screen fraction 0.5.
+The upstream test budgets (4 h Python, 3 h Rust) apply only when `unit-tests` runs. Timing:
+4 screen rounds, 6 full rounds, rerun multiplier 2, 1 warm-up, at least 2 timed calls and 1 s
+per round. Cost thresholds (fixed, never calibrated): panel ratio 1.03, case ratio 1.10 above
+a 25 ms (32 MiB) floor, screen fraction 0.5.
 
 ## Statistical power
 
@@ -142,7 +155,7 @@ are planning estimates from the design; measure the actual `SE` on your runner (
 in `report.md`).
 
 **Repeated attempts:** a neutral change passes the improvement test about 2.3% of the time.
-After 20 edit-and-compare rounds on the same profile, the chance of at least one lucky `PASS`
+After 20 edit-and-rerun rounds on the same profile, the chance of at least one lucky `PASS`
 is about a third. This is why the confirm profile exists: it contains 35 input groups that
 this loop never sees.
 
@@ -151,13 +164,14 @@ this loop never sees.
 On the development machine (serial, Apple M1 Max): about 10 CPU-minutes of quality compiles
 per revision, roughly doubled by routing replay. The 2026-09-25 A/A run spent 101 minutes of
 wall time in the quality stage when batches ran one at a time; batches now run 9 at a time.
-Per-stage wall times of every run are in its `progress.log`. A cost round (16 cases in one process per
-arm, 2 arms) takes about 1.5 minutes on an exclusive machine, so a clear 4-round screen is
-about 6–7 minutes. The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about
-35 minutes, plus about 10–20 minutes for the companion when required. These are design
-estimates, not measured runs. There is no calibration step: the cost thresholds are fixed in
-the policy, and the baseline's quality compiles are cached for later runs. Building the
-Qiskit environments dominates the first run; see
+Each stage's step durations are in `stages/<stage>/progress.log`, and `decide` gathers them
+in the session's `progress.log`. A cost round (16 cases in one process per arm, 2 arms) takes
+about 1.5 minutes on an exclusive machine, so a clear 4-round screen is about 6–7 minutes.
+The worst case is screen + full + rerun = 4 + 6 + 12 = 22 rounds, about 35 minutes, plus
+about 10–20 minutes for the companion when required. These are design estimates, not
+measured runs. There is no calibration step: the cost thresholds are fixed in the policy, and
+the baseline's build and quality compiles are kept in the baseline store for later sessions.
+Building the Qiskit environments dominates the first run; see
 [environments.md](environments.md#how-long-it-takes).
 
 ## Declared coverage gaps

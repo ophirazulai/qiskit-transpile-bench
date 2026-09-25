@@ -3,12 +3,16 @@
 Each suite compiles every configuration concurrently, then sends all oracle requests to the
 verifier at once. ``verify_many`` verifies each distinct output once, so seeds and revisions
 that reproduce an output already verified cost nothing.
+
+Both suites run one revision at a time and report whether every check was decisive
+(``verified`` or ``mismatch``) with no worker failure: only then can the baseline half be
+kept in the store and replayed by later sessions.
 """
 
 from qtb.canonical import read_circuit, read_json
 from qtb.config import STAGES
 from qtb.coordinator.runlog import step
-from qtb.coordinator.storage import append_record
+from qtb.coordinator.storage import append_record, read_records
 from qtb.evaluator import record
 
 # C6 already replays layout and routing exactly on every scored seed. C7's own contribution is
@@ -80,9 +84,14 @@ def _plan(comparison, case, result, requests):
     return checks
 
 
+DECISIVE = {"verified", "mismatch"}
+
+
 def behavior_checks(comparison, revisions=("baseline", "evolved")):
+    """The frozen C1–C5 suite and API contracts; returns whether every result was decisive."""
     suite = read_json(comparison.fixtures / "correctness-suite.json")
     cases = suite["cases"]
+    decisive = True
     for revision in revisions:
         subject = "reference" if revision == "baseline" else "evolved"
         comparison.progress(
@@ -100,6 +109,7 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
         ]
         with step(comparison, f"API contract checks ({len(api_cases)})"):
             api = comparison.jobs((revision, case, "api_checks", [0]) for case in api_cases)
+        decisive &= all(r["status"] == "ok" for rows in (*compiled, *api) for r in rows)
         requests, plans = [], []
         for case, results in zip(cases, compiled, strict=True):
             for result in results:
@@ -115,6 +125,7 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
                 check.update(case_id=case["case_id"], revision=revision, seed=result["seed"])
                 append_record(comparison.directory / "correctness.jsonl", check)
                 statuses.append(check["status"])
+                decisive &= check["status"] in DECISIVE
                 if check["status"] == "mismatch":
                     comparison.evidence(
                         record(
@@ -155,9 +166,15 @@ def behavior_checks(comparison, revisions=("baseline", "evolved")):
             "passed" if required <= passed else "unresolved",
         )
     )
+    return decisive
 
 
-def clifford_checks(comparison, cases):
+def clifford_checks(comparison, cases, revisions=("baseline", "evolved")):
+    """C7 on the Clifford variants; returns whether every result was decisive.
+
+    ``{prefix}1/C7`` covers the prefix-mode checks of both revisions in ``clifford.jsonl``,
+    including baseline rows replayed from the store.
+    """
     seeds = range(CLIFFORD_SEEDS[comparison.prefix])
     modes = (
         ("full", [], STAGES, []),
@@ -171,7 +188,7 @@ def clifford_checks(comparison, cases):
     if not CLIFFORD_FULL_MODE[comparison.prefix]:
         modes = tuple(mode for mode in modes if mode[0] != "full")
     specs, labels = [], []
-    for revision in ("baseline", "evolved"):
+    for revision in revisions:
         for case in cases:
             if "clifford_variant" not in case:
                 continue
@@ -207,7 +224,7 @@ def clifford_checks(comparison, cases):
             planned.append((revision, case, mode, output, check))
     with step(comparison, f"verify {len(requests)} Clifford outputs"):
         verdicts = comparison.verify_many(requests)
-    checks = []
+    decisive = True
     for revision, case, mode, output, check in planned:
         if isinstance(check, int):
             check = verdicts[check]
@@ -215,8 +232,7 @@ def clifford_checks(comparison, cases):
             case_id=case["case_id"], revision=revision, seed=output["seed"], mode=mode, oracle="C7"
         )
         append_record(comparison.directory / "clifford.jsonl", check)
-        if mode == "prefix":
-            checks.append(check)
+        decisive &= check["status"] in DECISIVE
         if check["status"] == "mismatch":
             comparison.evidence(
                 record(
@@ -226,10 +242,19 @@ def clifford_checks(comparison, cases):
                     "reference" if revision == "baseline" else "evolved",
                 )
             )
+    checks = [
+        row
+        for row in read_records(comparison.directory / "clifford.jsonl")
+        if row.get("mode") == "prefix"
+    ]
+    both = {row["revision"] for row in checks} == {"baseline", "evolved"}
     comparison.evidence(
         record(
             f"{comparison.prefix}1/C7",
             "correctness",
-            "passed" if checks and all(c["status"] == "verified" for c in checks) else "unresolved",
+            "passed"
+            if both and all(c["status"] == "verified" for c in checks)
+            else "unresolved",
         )
     )
+    return decisive

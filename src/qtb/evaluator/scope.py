@@ -1,7 +1,6 @@
 """Conservative, level-aware changed-stage mapping and semantic coverage."""
 
 from qtb.config import STAGES
-from qtb.errors import HarnessError
 
 
 def _non_source_path(path):
@@ -43,10 +42,8 @@ def _non_source_path(path):
     return name.endswith((".md", ".rst"))
 
 
-def changed_scope(paths, level, declaration=()):
-    if not set(declaration) <= set(STAGES):
-        raise HarnessError("Unknown stage in scope declaration")
-    stages, components, unknown = set(declaration), set(), []
+def changed_scope(paths, level):
+    stages, components, unknown = set(), set(), []
     for path in paths:
         path = path.lower().replace("\\", "/")
         if _non_source_path(path):

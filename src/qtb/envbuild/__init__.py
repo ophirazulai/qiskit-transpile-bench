@@ -230,41 +230,30 @@ def baseline_toolchain(snapshot_info):
     return tomllib.loads(path.read_text())["toolchain"]["channel"]
 
 
-def build_revision(
-    snapshot_info,
-    destination,
-    locks,
-    harness_wheel,
-    toolchain,
-    cache_root=None,
-    cache_slot="baseline",
-    progress=None,
-):
-    destination, locks = Path(destination).resolve(), Path(locks).resolve()
-    destination.mkdir(parents=True, exist_ok=False)
-    log = destination / "build.log"
-    envdir, source = destination / "env", destination / "source"
-    shutil.copytree(snapshot_info["path"], source, symlinks=True)
-    cargo = destination / "cargo"
-    cargo.mkdir()
-    (cargo / "config.toml").write_text("[net]\nretry = 2\n")
-    # Cargo's registry contains downloaded, checksum-verified crates. Share
-    # downloads, but keep each build's CARGO_HOME config and target/ separate.
-    if cache_root is not None:
-        registry_cache = Path(cache_root).resolve() / "cargo-registry"
-        registry_cache.mkdir(parents=True, exist_ok=True)
-        (cargo / "registry").symlink_to(registry_cache, target_is_directory=True)
+def build_environment(toolchain, cargo_home=None):
     env = sanitized_environment(
         {
             "QISKIT_BUILD_PROFILE": "release",
             "QISKIT_BUILD_WITH_MIMALLOC": "1",
             **RUST_PROFILE,
             "RUSTUP_TOOLCHAIN": toolchain,
-            "CARGO_HOME": str(cargo),
             "PIP_CONFIG_FILE": os.devnull,
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
         }
     )
+    if cargo_home is not None:
+        env["CARGO_HOME"] = str(cargo_home)
+    return env
+
+
+def build_identity(snapshot_info, locks, toolchain):
+    """Everything a build depends on, resolved before any build work starts.
+
+    Cheap: it reads the snapshot hash, the lock files and the tool versions. The baseline
+    store looks up a ready build by this identity before copying or compiling anything.
+    """
+    locks = Path(locks).resolve()
+    env = build_environment(toolchain)
     tool = subprocess.run(["rustc", "-Vv"], env=env, capture_output=True, text=True, check=False)
     if tool.returncode:
         raise HarnessError(f"Cannot resolve baseline toolchain {toolchain}: {tool.stderr}")
@@ -276,7 +265,7 @@ def build_revision(
         if version.returncode:
             raise HarnessError(f"Cannot resolve native compiler {compiler}")
         compilers[compiler] = version.stdout
-    identity = {
+    return {
         "snapshot": snapshot_info["tree_hash"],
         "python": sys.version,
         "locks": {p.name: file_hash(p) for p in locks.iterdir() if p.is_file()},
@@ -286,6 +275,35 @@ def build_revision(
         "os": platform.system(),
         "architecture": platform.machine(),
     }
+
+
+def build_into(
+    snapshot_info,
+    destination,
+    identity,
+    locks,
+    harness_wheel,
+    toolchain,
+    wheel_cache=None,
+    label="baseline",
+    progress=None,
+):
+    """Build ``snapshot_info`` at its final path ``destination``.
+
+    A virtual environment holds absolute paths, so the build is never moved afterwards.
+    ``wheel_cache`` (the store's ``wheels/``) skips the Rust compile for a known identity.
+    Each build keeps its own ``CARGO_HOME``, crates included. ``source/target/release`` is
+    deleted once the wheel is installed and verified: nothing reads it again.
+    """
+    destination, locks = Path(destination).resolve(), Path(locks).resolve()
+    destination.mkdir(parents=True, exist_ok=False)
+    log = destination / "build.log"
+    envdir, source = destination / "env", destination / "source"
+    shutil.copytree(snapshot_info["path"], source, symlinks=True)
+    cargo = destination / "cargo"
+    cargo.mkdir()
+    (cargo / "config.toml").write_text("[net]\nretry = 2\n")
+    env = build_environment(toolchain, cargo)
     run_logged([sys.executable, "-m", "venv", envdir], destination, env, log)
     python = envdir / "bin/python"
     run_logged(
@@ -309,7 +327,7 @@ def build_revision(
     before = file_hash(cargo_lock)
     wheel_dir = destination / "wheels"
     wheel_dir.mkdir()
-    cache = Path(cache_root) / cache_slot / digest(identity) if cache_root else None
+    cache = Path(wheel_cache) / digest(identity) if wheel_cache else None
     cache_hit = False
     if cache and (cache / "wheel.json").exists():
         cached = read_json(cache / "wheel.json")
@@ -319,20 +337,10 @@ def build_revision(
             cache_hit = True
     if progress is not None:
         if cache_hit:
-            progress(f"Reusing cached {cache_slot} Qiskit wheel; skipping the Rust compile.")
+            progress(f"Reusing the stored {label} Qiskit wheel; skipping the Rust compile.")
         else:
-            progress(f"No cached {cache_slot} Qiskit wheel; compiling Qiskit from source.")
+            progress(f"Compiling the {label} Qiskit wheel from source.")
     if not cache_hit:
-        compile_env = env
-        if cache_root is not None:
-            from qtb.coordinator.storage import locked
-
-            # Concurrent builds share the registry, but cargo's package lock lives
-            # in each build's own CARGO_HOME. Download and unpack every crate under
-            # one registry-wide lock, then compile without touching the registry.
-            with locked(Path(cache_root) / "cargo-registry.lock"):
-                run_logged(["cargo", "fetch", "--locked"], source, env, log)
-            compile_env = dict(env, CARGO_NET_OFFLINE="true")
         run_logged(
             [
                 python,
@@ -346,7 +354,7 @@ def build_revision(
                 source,
             ],
             destination,
-            compile_env,
+            env,
             log,
             timeout=RUST_WHEEL_TIMEOUT_S,
         )
@@ -409,14 +417,44 @@ def build_revision(
         "identity": identity,
         "python": str(python),
         "environment": str(envdir),
-        "snapshot": snapshot_info,
+        # The build's own copy of the source: the snapshot's hash and provenance, but a path
+        # that lives as long as the build (a store build never points into a session).
+        "snapshot": dict(snapshot_info, path=str(source)),
         "provenance": provenance,
         "wheel": str(wheels[0]),
         "wheel_sha256": file_hash(wheels[0]),
         "pip_freeze": freeze,
     }
     write_json(destination / "build.json", result)
+    verify_build(result)
+    # The wheel is installed in env/ and cargo test uses the debug profile.
+    shutil.rmtree(source / "target" / "release", ignore_errors=True)
     return result
+
+
+def host_mismatch(build):
+    """Why this host cannot run ``build``, or ``None`` when it can."""
+    identity = build["identity"]
+    here = {
+        "os": platform.system(),
+        "architecture": platform.machine(),
+        "python": platform.python_version(),
+    }
+    built = {
+        "os": identity["os"],
+        "architecture": identity["architecture"],
+        "python": identity["python"].split()[0],
+    }
+    for key, value in built.items():
+        if here[key] != value:
+            return f"{key} is {here[key]} here but the build needs {value}"
+    python = Path(build["python"])
+    if not python.exists():
+        return f"Build interpreter is missing on this host: {python}"
+    proc = subprocess.run([python, "-c", "pass"], capture_output=True, check=False)
+    if proc.returncode:
+        return f"Build interpreter does not run on this host: {python}"
+    return None
 
 
 def verify_build(build):

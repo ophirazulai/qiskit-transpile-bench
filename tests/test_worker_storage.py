@@ -12,7 +12,6 @@ from qtb.coordinator.storage import (
     cache_quality_observation,
     cached_quality_observation,
     quality_cache_key,
-    register_decision,
 )
 from qtb.envbuild import SERIAL, diff_snapshots, sanitized_environment, snapshot
 from qtb.errors import HarnessError
@@ -69,7 +68,7 @@ def test_snapshot_non_git_dirty_source_and_external_symlink(tmp_path):
         snapshot(source, tmp_path / "unsafe")
 
 
-def test_cache_scopes_and_decision_count(tmp_path):
+def test_cache_scopes():
     case = {"case_id": "a", "options": {}, "weight": 1, "semantic_reference": {"kind": "input"}}
     a = quality_cache_key({"id": "x"}, case, {}, {}, "h")
     assert a == quality_cache_key({"id": "x"}, dict(case, weight=0.5), {}, {}, "h")
@@ -95,9 +94,6 @@ def test_cache_scopes_and_decision_count(tmp_path):
     )
     with pytest.raises(HarnessError):
         quality_cache_key({"id": "x"}, case, {}, {}, "h", mode="memory")
-    assert register_decision(tmp_path, "m", "r1") == 0
-    assert register_decision(tmp_path, "m", "r2") == 1
-    assert register_decision(tmp_path, "m", "r1") == 0
 
 
 @pytest.mark.parametrize("git", [False, True])
@@ -275,7 +271,6 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
     wheel_budgets = []
     cargo_homes = []
     build_flags = []
-    fetches = []
 
     def command(args, cwd, env, log, timeout=3600):
         args = list(map(str, args))
@@ -285,11 +280,12 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
             (root / "bin/python").write_text("python")
             (root / "qiskit.py").write_text("package")
             (root / "native.so").write_bytes(b"native")
-        elif args[:2] == ["cargo", "fetch"]:
-            fetches.append(Path(env["CARGO_HOME"]))
         elif "wheel" in args:
             output = Path(args[args.index("-w") + 1])
             (output / "qiskit-test.whl").write_bytes(b"wheel")
+            release = Path(args[-1]) / "target/release"
+            release.mkdir(parents=True)
+            (release / "libqiskit.so").write_bytes(b"release artifacts")
             compiles.append(str(cwd))
             wheel_budgets.append(timeout)
             cargo_homes.append(Path(env["CARGO_HOME"]))
@@ -299,7 +295,7 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
                     env["QISKIT_BUILD_WITH_MIMALLOC"],
                     env["CARGO_PROFILE_RELEASE_LTO"],
                     env["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"],
-                    env["CARGO_NET_OFFLINE"],
+                    "CARGO_NET_OFFLINE" in env,
                 )
             )
 
@@ -324,31 +320,39 @@ def test_wheel_cache_preserves_independent_builds_and_invalidates_source(tmp_pat
 
     monkeypatch.setattr(envbuild, "run_logged", command)
     monkeypatch.setattr(envbuild.subprocess, "run", subprocess_run)
-    cache = tmp_path / "cache"
-    first = envbuild.build_revision(info, tmp_path / "a", locks, wheel, "1.89", cache, "baseline")
-    second = envbuild.build_revision(info, tmp_path / "b", locks, wheel, "1.89", cache, "baseline")
-    evolved = envbuild.build_revision(info, tmp_path / "c", locks, wheel, "1.89", cache, "evolved")
-    changed = envbuild.build_revision(
-        dict(info, tree_hash="source2"), tmp_path / "d", locks, wheel, "1.89", cache, "baseline"
-    )
+    cache = tmp_path / "store-wheels"
+
+    def build(snapshot_info, name, wheel_cache):
+        identity = envbuild.build_identity(snapshot_info, locks, "1.89")
+        return envbuild.build_into(
+            snapshot_info, tmp_path / name, identity, locks, wheel, "1.89", wheel_cache
+        )
+
+    first = build(info, "a", cache)
+    second = build(info, "b", cache)
+    evolved = build(info, "c", None)
+    changed = build(dict(info, tree_hash="source2"), "d", cache)
     assert len(compiles) == 3
     assert first["id"] == second["id"] == evolved["id"]
     assert second["wheel_cache_hit"] and not evolved["wheel_cache_hit"]
     assert changed["id"] != first["id"]
     assert len({b["environment"] for b in (first, second, evolved, changed)}) == 4
     assert wheel_budgets == [envbuild.RUST_WHEEL_TIMEOUT_S] * 3
-    assert build_flags == [("release", "1", "thin", "16", "true")] * 3
+    assert build_flags == [("release", "1", "thin", "16", False)] * 3
     assert first["identity"]["flags"]["CARGO_PROFILE_RELEASE_LTO"] == "thin"
-    assert fetches == cargo_homes  # crates are fetched under the registry lock first
+    # Each build keeps its own CARGO_HOME and crates; there is no shared registry.
     assert len(set(cargo_homes)) == 3
     assert all((path / "config.toml").exists() for path in cargo_homes)
-    assert {str((path / "registry").resolve()) for path in cargo_homes} == {
-        str((cache / "cargo-registry").resolve())
-    }
+    assert not any((path / "registry").is_symlink() for path in cargo_homes)
+    # The build records its own copy of the source and drops the release artifacts.
+    for result, name in ((first, "a"), (evolved, "c")):
+        assert result["snapshot"]["path"] == str((tmp_path / name / "source").resolve())
+        assert result["snapshot"]["tree_hash"] == "source1"
+        assert not (tmp_path / name / "source/target/release").exists()
 
 
 def test_pruning_keeps_failures_and_external_cached_outputs(tmp_path):
-    from qtb.coordinator.storage import prune_outputs
+    from qtb.coordinator.storage import output_deletions
 
     run = tmp_path / "run"
     run.mkdir()
@@ -364,14 +368,16 @@ def test_pruning_keeps_failures_and_external_cached_outputs(tmp_path):
         )
         for i, path in enumerate(paths)
     ]
-    result = prune_outputs(run, rows, 20)
-    assert len(result) == 1
-    assert not paths[0].exists() and paths[1].exists() and paths[2].exists()
+    result = output_deletions(run, rows, 20)
+    assert list(result) == [str(paths[0].resolve())]
+    assert result[str(paths[0].resolve())]["compressed_sha256"]
+    # Planning deletes nothing; clean does, after recording the plan.
+    assert all(path.exists() for path in paths)
 
 
 def test_verified_large_c6_prefixes_prune_with_archived_hashes_and_jobs(tmp_path):
-    from qtb.canonical import read_json, write_json
-    from qtb.coordinator.storage import prune_prefix_outputs
+    from qtb.canonical import write_json
+    from qtb.coordinator.storage import prefix_output_deletions
 
     run = tmp_path / "run"
     prefixes = []
@@ -406,19 +412,15 @@ def test_verified_large_c6_prefixes_prune_with_archived_hashes_and_jobs(tmp_path
             ],
         },
     ]
-    retained = prune_prefix_outputs(run, rows, 20)
-    assert len(retained) == 2
-    assert all(not Path(prefix["output"]).exists() for prefix in prefixes)
-    assert unverified.exists()
-    assert all(Path(prefix["job_file"]).exists() for prefix in prefixes)
-    assert read_json(run / "retention.json") == retained
-    assert {row["output_hash"] for row in retained.values()} == {"initial", "routed"}
-    assert all(row["compressed_sha256"] for row in retained.values())
-    assert prune_prefix_outputs(run, rows, 20) == retained
+    planned = prefix_output_deletions(run, rows, 20)
+    assert set(planned) == {str(Path(prefix["output"]).resolve()) for prefix in prefixes}
+    assert str(unverified.resolve()) not in planned
+    assert {row["output_hash"] for row in planned.values()} == {"initial", "routed"}
+    assert all(row["compressed_sha256"] for row in planned.values())
+    assert all(Path(row["job_file"]).exists() for row in planned.values())
 
 
-def test_quality_cache_owns_output_after_run_pruning(tmp_path):
-    from qtb.coordinator.storage import prune_outputs
+def test_quality_cache_owns_output_after_session_cleanup(tmp_path):
 
     run = tmp_path / "run"
     run.mkdir()
@@ -437,8 +439,7 @@ def test_quality_cache_owns_output_after_run_pruning(tmp_path):
     assert cached["output"] != str(output)
     assert cached["worker"]["output"] == cached["output"]
     assert Path(cached["worker"]["job_file"]).read_text() == job_file.read_text()
-    prune_outputs(run, [observation], 20)
-    assert not output.exists()
+    output.unlink()  # as clean deletes a session's verified outputs
     assert cached_quality_observation(cache / "0.json") == cached
     Path(cached["output"]).write_bytes(b"tampered")
     assert cached_quality_observation(cache / "0.json") is None
@@ -500,7 +501,9 @@ def test_unattempted_quality_seed_is_unresolved(tmp_path):
     comparison = Comparison.__new__(Comparison)
     comparison.directory = tmp_path / "run"
     comparison.directory.mkdir()
-    comparison.root = tmp_path
+    comparison.stage = "quality"
+    comparison.store = None
+    comparison.machine = {}
     comparison.fixtures = data_root() / "fixtures"
     comparison.run = {
         "builds": {"evolved": {"id": "build"}},
@@ -522,10 +525,11 @@ def test_batched_routing_prefixes_preserve_per_seed_checks(tmp_path):
     from qtb.canonical import read_json
     from qtb.coordinator import Comparison
 
-    comparison = Comparison(
-        tmp_path, tmp_path, results_root=tmp_path / "results", progress=lambda *_: None
-    )
-    comparison.run["builds"] = {"baseline": local_build()}
+    comparison = Comparison.__new__(Comparison)
+    comparison.directory = tmp_path / "session"
+    comparison.fixtures = data_root() / "fixtures"
+    comparison.progress = lambda *_: None
+    comparison.run = {"builds": {"baseline": local_build()}}
     case = next(
         c
         for c in read_json(data_root() / "fixtures/correctness-suite.json")["cases"]

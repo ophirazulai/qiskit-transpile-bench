@@ -140,7 +140,7 @@ machine's cost noise. Version 4 of the profiles removed that phase (see
 - The quality guards use their fixed multipliers only. Their combined false-rejection rate on
   a given runner is not estimated, and the report says so.
 - The cost guards use the fixed thresholds of section 6. Whether they match a runner's noise
-  is checked, if at all, by one manual A/A `compare` (same source as baseline and evolved).
+  is checked, if at all, by one manual A/A session (same source as baseline and evolved).
 - Deterministic, zero-baseline and canary constants are checked on the B0 seeds only. A
   baseline that misses its own constant there gives `INCONCLUSIVE`.
 
@@ -164,9 +164,11 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   warms up (`warmups` = 1 call) and times every case of the panel in manifest order, timing
   each until at least `minimum_calls` (2) calls and `minimum_ns` (1 s) have accumulated; the
   companion and memory use one fresh process per arm and case. The two arms (baseline,
-  evolved) run interleaved in random order within each round. Nothing else may run:
-  the coordinator takes an exclusive machine lock and refuses to start if the load average is
-  above half the core count.
+  evolved) run interleaved in random order within each round. Nothing else may run: the
+  `cost` stage takes an exclusive runner lock and waits up to 5 minutes for the load average
+  to fall below half the core count; if it does not, the result is `unresolved`. On a
+  cluster the stage should also have an exclusive host (`bsub -x`); the lock and the wait
+  are a second line of defence.
 - **Thresholds** (`policy.json` → `cost_thresholds`), the same for every runner:
   `panel_ratio` 1.03, `case_ratio` 1.10, `case_floor_ns` 25 ms, `case_floor_bytes` 32 MiB,
   `screen_fraction` 0.5. Every cost bundle records the digest of this block
@@ -182,11 +184,13 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   measured once more with doubled rounds. A breach again → `failed`; a pass →
   `passed_on_rerun`.
 
-Cost is measured only when the improvement test passed and nothing has failed, because it
-needs an exclusive machine and hours of wall time. The exception is an A/A run (both builds
-have the same ID): it never improves, but its cost panels are the known-outcome check that
-timing and memory report no change, so they are measured unless a correctness or guard check
-failed.
+Cost is its own stage, `cost`, because it needs a quiet, exclusive host and can take hours
+of wall time. It runs after `correctness` and only when the quality gate is open
+(section 8): the candidate improved and every quality check passed, or the run is an A/A run
+(both builds have the same ID) and every quality check passed. An A/A run never improves, but
+its cost panels are the known-outcome check that timing and memory report no change. When
+correctness found a failure, `cost` records `skipped` without measuring. Cost samples are
+never taken from the baseline store: both arms are measured in the same session.
 
 ## 7. Change scope and stage coverage
 
@@ -198,12 +202,15 @@ it changed (`evaluator/scope.py`):
    layout, routing; `vf2` → layout, routing (+ optimization at level 3); two-qubit
    decomposition or unitary synthesis → init, translation, optimization; commutative
    cancellation → init, optimization. Tests, docs, release notes and lock files are ignored.
-   Any other path under `qiskit/` or `crates/*/src/` counts as **all stages**.
-3. `--change-scope scope.json` (`{"stages": ["optimization"]}`) can add stages but never
-   remove them.
-4. For every scored case, some verified check must cover all changed stages, for an applicable
+   Any other path under `qiskit/` or `crates/*/src/` counts as **all stages**, and so does
+   any path the mapping does not recognize. There is no way to declare a scope by hand.
+3. For every scored case, some verified check must cover all changed stages, for an applicable
    input domain, without having substituted a changed component. Otherwise
    `IA1/stage-coverage` (`CA1/...`) is `unresolved`.
+
+The rule combines the quality checks (C0, C6, C1-lite) with the C7 Clifford checks of the
+`correctness` stage, so `decide` computes `*1/stage-coverage` once both stages are complete.
+If either has not run, for example because the quality gate is closed, the record is missing.
 
 In practice: routing replay (C6) covers layout and routing on every scored output, so a
 layout/routing-only change can `PASS`. Nothing verifies the optimization stage at scale for
@@ -219,9 +226,10 @@ Every check produces a **constraint record**: `{id, kind, subject, result, ...}`
 - `subject`: `evolved` (the candidate or the comparison) or `reference` (the baseline alone)
 - `result`: `passed`, `failed`, `passed_on_rerun`, `unresolved`, `not_evaluated`
 
-The set of required IDs comes from the policy plus every panel the evaluator creates. It never
-depends on which records happen to exist. The verdict (`evaluator.verdict()`) is decided in
-this order:
+The set of required IDs comes from the policy, plus every panel the evaluator creates, plus
+the cost panels the change scope requires, plus `*1/upstream` once the optional `unit-tests`
+stage has started. It never depends on which records happen to exist. The verdict
+(`evaluator.verdict()`) is decided in this order:
 
 ```text
 any failed harness record                        → ERROR                 (exit 40)
@@ -232,8 +240,44 @@ every required ID present and passed              → PASS                  (exi
 otherwise (missing / unresolved)                  → INCONCLUSIVE          (exit 30)
 ```
 
-A missing record can never produce `PASS`. `harness/qualification` is required too, so an
-unqualified configuration tops out at `INCONCLUSIVE` even when everything else passes.
+A missing record can never produce `PASS`. There is no qualification record: a session ends
+`PASS` when every required record passes. A/A runs and the known-outcome mutations remain the
+way to validate the harness on a new runner
+([known-outcome-validation.md](known-outcome-validation.md)), but they are practices, not
+required records.
+
+### Stages and the quality gate
+
+The records come from separate stages (`compile`, `quality`, `correctness`, optional
+`unit-tests`, `cost`), and `decide` merges the evidence of the stages that are complete. A
+failed stage contributes only `harness/error/<stage>`, which gives `ERROR`.
+
+At the end of `quality`, the **gate** decides whether the later stages run:
+
+| Gate | When | Then |
+| --- | --- | --- |
+| `improved` | Every non-improvement record (round-trip, audit, C0, C6, C1-lite, guards, caps, exact cases, completeness) and every improvement record (`IA2/improvement`; on confirm also `CA3/breadth`) passed | `correctness`, `unit-tests` and `cost` run |
+| `aa` | Both builds have the same ID and every non-improvement record passed | They run as a check of the harness |
+| `closed` | Anything else: no improvement, an unresolved improvement, or a failed or unresolved quality check | They record `skipped`. The verdict comes from the quality evidence alone |
+
+`compile` and `quality` are always required. `correctness` is required when the gate is
+open, `cost` when the gate is open and correctness found no failure, and `unit-tests` once it
+has started. A required stage that has not finished forces `INCONCLUSIVE` (unless the verdict
+is `ERROR`).
+
+Quality runs before correctness, so some sessions end differently than they would if
+correctness ran first:
+
+| Situation | Verdict |
+| --- | --- |
+| No improvement, incorrect candidate | `NO_IMPROVEMENT`: correctness never ran, and the report says so |
+| Quality failure (C0, C6, a guard) | `CONSTRAINT_VIOLATION`, without running the correctness suite |
+| Improvement, correctness fails | `CONSTRAINT_VIOLATION`; `cost` is skipped |
+| Improvement, baseline fails C1–C5, API or C7 | `baseline/preflight` fails and the evolved half is not checked. `decide` sets aside the quality evidence, so the verdict is `INCONCLUSIVE`; the report says so |
+| No improvement, broken baseline | `NO_IMPROVEMENT`. The report says whether the baseline's correctness is known from the store |
+
+`baseline/preflight` covers the whole baseline half of `correctness`: C1–C5, the API
+contracts and C7.
 
 ## Diagnostics that never enter a decision
 

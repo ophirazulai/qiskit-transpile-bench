@@ -50,10 +50,26 @@ def _zero_baseline_deltas(manifest, observations):
 
 
 def make_decision(
-    run, records, required_ids, summaries, observations=(), manifest=None, policy=None
+    run,
+    records,
+    required_ids,
+    summaries,
+    observations=(),
+    manifest=None,
+    policy=None,
+    session=None,
 ):
+    """The verdict and its evidence. ``session`` is ``decide``'s view of the stages.
+
+    It may carry ``status``: a verdict that the stage states impose over the evidence (a
+    required stage that has not finished gives ``INCONCLUSIVE``), plus ``stages``, the
+    ``stage_state_hashes`` read and report ``notes``.
+    """
     observations = list(observations)
+    session = session or {}
     status = verdict(records, required_ids)
+    if session.get("status") and status != "ERROR":
+        status = session["status"]
     prefix = "CA" if run["profile"] == "confirm-profile" else "IA"
     depth = summaries.get(f"{prefix}2/improvement", {})
     gates = summaries.get(f"{prefix}3/primary/N2", {})
@@ -85,8 +101,10 @@ def make_decision(
         "profile": run["profile"],
         "hashes": run["hashes"],
         "seed_block": "B0",
-        "decisions_before": run.get("decisions_before", 0),
         "run_id": run["run_id"],
+        "stages": session.get("stages", []),
+        "stage_state_hashes": session.get("stage_state_hashes", {}),
+        "notes": session.get("notes", []),
         "identities": {k: v["id"] for k, v in run.get("builds", {}).items()},
         "constraints": records,
         "required_ids": sorted(required_ids),
@@ -118,12 +136,32 @@ def make_decision(
     return decision
 
 
+def _duration(seconds):
+    from qtb.coordinator.runlog import duration
+
+    return duration(seconds)
+
+
 def render_report(decision):
-    lines = [
-        f"# {decision['status']} — {decision['profile']}",
-        "",
-        f"Earlier decisions for this manifest: {decision['decisions_before']}.",
-        "",
+    lines = [f"# {decision['status']} — {decision['profile']}", ""]
+    if decision.get("stages"):
+        lines += [
+            "## Stages",
+            "",
+            "| Stage | State | Host | Duration | Note |",
+            "| --- | --- | --- | ---: | --- |",
+        ]
+        for row in decision["stages"]:
+            seconds = row.get("seconds")
+            shown = _duration(seconds) if isinstance(seconds, (int, float)) else "—"
+            lines.append(
+                f"| {row['stage']} | {row['status']} | {row.get('host') or '—'} | {shown} | "
+                f"{row.get('note') or ''} |"
+            )
+        lines.append("")
+    if decision.get("notes"):
+        lines += [f"- {note}" for note in decision["notes"]] + [""]
+    lines += [
         "The baseline named for this comparison is the reference for every test.",
         "Iterate on iterations-profile; use confirm-profile as a check, not a tuning loop.",
         "This verdict concerns the fixed workload and its declared semantic contracts.",

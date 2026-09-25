@@ -80,14 +80,12 @@ def policy(profile):
     prefix = "CA" if profile == "confirm-profile" else "IA"
     required = [
         "harness/roundtrip",
-        "harness/qualification",
         "baseline/preflight",
         "audit/determinism",
         f"{prefix}1/C0",
         f"{prefix}1/C1-C5",
         f"{prefix}1/C6",
         f"{prefix}1/C7",
-        f"{prefix}1/upstream",
         f"{prefix}1/stage-coverage",
         f"{prefix}2/improvement",
         f"{prefix}5/timing",
@@ -98,7 +96,7 @@ def policy(profile):
     return dict(
         format="qtb-policy/1",
         profile=profile,
-        version=4,
+        version=5,
         required_ids=required,
         quality_prerequisites=["harness/roundtrip", "audit/determinism"],
         practical_ratio=0.99 if prefix == "CA" else 1.0,
@@ -135,10 +133,6 @@ def policy(profile):
             screen_fraction=0.5,
         ),
         tolerances=dict(operator_rtol=1e-7, operator_atol=1e-8, state_atol=1e-8),
-        qualification=dict(
-            status="unqualified",
-            reason="Requires known-outcome validation and inspected controlled-runner evidence",
-        ),
     )
 
 
@@ -461,9 +455,8 @@ def curate(source, root=ROOT):
         manifest = dict(
             format="qtb-manifest/1",
             profile=profile,
-            version=4,
+            version=5,
             cases=cases,
-            status="unqualified",
             coverage_gaps=[
                 "No line target in upstream suite",
                 "G2, G3, G6 have one sparse topology class",
@@ -492,7 +485,8 @@ def curate(source, root=ROOT):
         "The six RevLib artifacts with unresolved terms were replaced under plan section 3.8.",
         "Each replacement is a distinct upstream synthesis-library construction; "
         "the manifest records the mapping.",
-        "Baseline roles, cost, and oracle coverage still require controlled-runner qualification.",
+        "Baseline roles, cost, and oracle coverage are validated on each new runner "
+        "with A/A and known-outcome runs.",
         "",
         "| Fixture | Upstream source | License / availability |",
         "| --- | --- | --- |",

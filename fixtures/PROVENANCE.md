@@ -6,7 +6,7 @@ Qiskit-derived artifacts retain the Apache-2.0 license in LICENSE-QISKIT.txt.
 QUEKO source: https://github.com/UCLA-VAST/QUEKO-benchmark (BSD-3-Clause).
 The six RevLib artifacts with unresolved terms were replaced under plan section 3.8.
 Each replacement is a distinct upstream synthesis-library construction; the manifest records the mapping.
-Baseline roles, cost, and oracle coverage still require controlled-runner qualification.
+Baseline roles, cost, and oracle coverage are validated on each new runner with A/A and known-outcome runs.
 
 | Fixture | Upstream source | License / availability |
 | --- | --- | --- |
