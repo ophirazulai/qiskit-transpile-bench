@@ -7,7 +7,7 @@
                               user, and settle them in the ledger
 
 ``reap`` refuses while a manager holds the session's orchestration lock. Nothing here
-submits work or resumes a pipeline; to measure again, launch a new session.
+submits work; to continue a session whose manager ended, use ``lsf/submit.py --resume``.
 """
 
 import argparse
@@ -18,7 +18,7 @@ from pathlib import Path
 from qtb.canonical import read_json
 from qtb.coordinator.storage import LockBusy
 
-from lsf import lsf_directory
+from lsf import lsf_directory, retry
 from lsf.retry import ACTIVE, Ledger
 from lsf.scheduler import LsfBackend, QueryFailed
 
@@ -36,7 +36,8 @@ def _live(backend, entry):
 
 def status(lsf_dir, backend, out=print):
     ledger = Ledger.load(lsf_dir / "ledger.json")
-    out(f"session {ledger.data['session']} (run {ledger.data['run_id']})")
+    epoch = f", resume {ledger.epoch}" if ledger.epoch else ""
+    out(f"session {ledger.data['session']} (run {ledger.data['run_id']}{epoch})")
     for entry in sorted(ledger.jobs(), key=lambda e: e["reserved_at"]):
         live = _live(backend, entry) if entry["status"] in ACTIVE else None
         shown = getattr(live, "state", live) or (entry.get("outcome") or {}).get("kind")
@@ -46,6 +47,8 @@ def status(lsf_dir, backend, out=print):
             f"{shown or ''}{f'  ({reason})' if reason else ''}"
         )
     cost = ledger.data["cost"]
+    if ledger.epoch:
+        out(f"  cost jobs this epoch: {retry.budget_used(ledger)} of {retry.MAX_COST_ATTEMPTS}")
     if cost.get("exhausted"):
         out(f"  cost retries exhausted: {cost['exhausted']['reason']}")
     decide = ledger.data.get("decide") or {}

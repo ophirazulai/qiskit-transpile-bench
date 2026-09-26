@@ -268,10 +268,55 @@ and owner match the ledger, then settles them. Run it again if it reports unconf
 
 The manager is submitted rerunnable: if its host fails, LSF requeues it, and the new
 invocation (`manager-2.log`) reconciles the ledger first: it adopts jobs that are still
-running, settles those that ended and keeps the attempt count. There is no launcher resume
-option. To measure again, launch a new session with a new `--results-root`; the store makes
-it pay only for the evolved half. To run or replay single stages by hand, see [running the
-stages directly](workflow/README.md).
+running, settles those that ended and keeps the attempt count.
+
+### Resume a session
+
+After the manager ended (exhausted retries, a deadline, a failed stage you fixed, a killed
+manager), continue the same session instead of starting over:
+
+```bash
+uv run python lsf/submit.py --resume --results-root /shared/qtb-sessions/idea1
+```
+
+The new manager (`qtb-<run>-manager-r<n>`) keeps the recorded inputs and resources and
+starts a new *epoch* in the ledger: every unfinished stage gets one new job, cost gets a
+fresh budget of 21 jobs and no excluded hosts, and finished stages never run again. Attempt
+numbers keep counting. The previous epoch's cost accounting, verdict and cleanup are kept in
+`ledger.json:resumes`; `report.md` lists every resume. The recorded inputs and resources
+are kept: pass `--results-root` and optionally `--log-level`. Any other option may be
+repeated with its recorded value (so the original command works with `--resume` added) but
+not changed. The interpreter and project are taken from the running launcher.
+
+A resume is refused (exit 41) when:
+
+- the session is cleaned: nothing can be measured again (`qtb decide` replays its verdict);
+- a manager holds the session or is still in LSF (`lsf.control stop`), or any other job is
+  still active or unreconciled in the ledger (`lsf.control reap`);
+- an unfinished stage is pinned to another harness than the running one: every stage runs
+  with the harness that compiled the session (its wheel is in `harness-wheel/`).
+
+When only cost is unfinished and a later harness should measure it, for example because the
+harness that compiled the session aborts on noise its successor no longer judges, re-pin cost
+alone:
+
+```bash
+uv run python lsf/submit.py --resume --upgrade-cost \
+    --reason "monitor /2: setup windows no longer abort" --results-root /shared/qtb-sessions/idea1
+```
+
+This appends an amendment to `run.json:amendments`: the new coordinator and implementation
+identities (for the cost stage only), the new `cost_evidence` requirement, the replaced
+values, the reason, and the new harness wheel under `harness-wheel/amendments/<n>/`. It is
+refused unless compile, quality and correctness are final (unit-tests final or never
+started) and cost is not final: a finished cost stage is never measured again, under any
+harness. Saved cost bundles are checked against the new requirement before reuse and measured
+again when they fail it. The build environments and their harness wheel
+(`run.json:hashes.harness`) stay the compiled ones. The verdict notes every amendment.
+
+To measure again from scratch, launch a new session with a new `--results-root`; the store
+makes it pay only for the evolved half. To run or replay single stages by hand, see [running
+the stages directly](workflow/README.md).
 
 ## 10. Detailed logs
 
@@ -299,7 +344,8 @@ grep -h '"event": "stage.outcome"' /shared/qtb-sessions/idea1.lsf/logs/*/manager
 | Cost exits 41: "Monitored cost cannot run in this allocation" | the cost job's log, `job.finished` | The site ignored the affinity request, the mask covers only part of an SMT core, or the host is not the approved tier. Check the queue enables affinity and the tier selector |
 | "the evidence extension ... is unavailable" in `report.md` | the session's `run.json:cost_evidence` | Decide with the harness that created the session (its wheel is in `harness-wheel/`) |
 | Cost attempts keep ending `noisy` | the orchestration report's cost table; `contamination*.json` under `<results-root>/cost/monitor/<job key>/` | Check which check failed and the foreign fraction. Busy tiers need calibration of thresholds and windows; narrow the tier or the load limit |
-| "Retry budget exhausted" | `ledger.json` → `cost.exhausted` | The verdict is `INCONCLUSIVE`, not a regression. Launch a new session later or on a quieter tier |
+| "Retry budget exhausted" | `ledger.json` → `cost.exhausted` | The verdict is `INCONCLUSIVE`, not a regression. `--resume` later for a fresh budget, or launch a new session on a quieter tier |
+| `--resume` refused: "cost is pinned to another harness" | `run.json:hashes`, `harness-wheel/` | Resume with the archived harness wheel, or `--resume --upgrade-cost --reason ...` ([resume](#resume-a-session)) |
 | compile fails | `jobs/job-compile-*.log`; `builds/evolved-build/build.log` or the store's `build.log` | Fix the toolchain or dependency cache; launch a new session |
 | A stage exits 41 "cannot run the ... build" | the job log | The node differs in OS, architecture or Python, or the interpreter path is not shared |
 | Shared path missing on a node | the job's `.out` file | Mount the store, sessions, checkout and uv Python at identical paths |

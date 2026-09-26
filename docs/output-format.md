@@ -45,6 +45,7 @@ can contain failed checks and still exit 0; `decide` reports their effect on the
 | `run.json` | `compile` | Session inputs, hashes, builds and store ([below](#runjson)). No other command writes it |
 | `manifest.json`, `policy.json` | `compile` | Archived copies of the profile used. Later stages check them against `run.json`; `decide` decides from them |
 | `harness-wheel/`, `harness-build.log` | `compile` | The harness wheel installed in every environment |
+| `harness-wheel/amendments/<n>/`, `harness-build-amendment-<n>.log` | an amendment | The harness wheel a re-pinned cost stage requires ([`amendments`](#runjson)) |
 | `builds/baseline/`, `builds/evolved/`, `builds/<revision>.snapshot.json` | `compile` | Source snapshots of both trees and their file manifests ([compile](workflow/compile.md#how-a-revision-is-built)) |
 | `builds/evolved-build/` | `compile` | The evolved build: `source/`, `env/`, `cargo/`, `wheels/`, `build.json`, `build.log`. The baseline build is in the store |
 | `verifier/` | `compile` | Verifier environment |
@@ -80,8 +81,9 @@ evidence files is a harness error. `decide` adds `*1/stage-coverage` itself once
 
 ## `run.json`
 
-Format `qtb-run/3` (`qtb-run/2` sessions are still read). Written only by `compile`;
-`decide` never rewrites it.
+Format `qtb-run/3` (`qtb-run/2` sessions are still read), `qtb-run/4` once amended. Written
+only by `compile`; an amendment (`lsf/submit.py --resume --upgrade-cost`, or
+`qtb.coordinator.amend.amend_cost`) only appends to `amendments`; `decide` never rewrites it.
 
 | Field | Content |
 | --- | --- |
@@ -99,6 +101,7 @@ Format `qtb-run/3` (`qtb-run/2` sessions are still read). Written only by `compi
 | `coverage_gaps` | The profile's declared coverage gaps |
 | `verifier_python` | The verifier interpreter |
 | `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/2`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
+| `amendments` | Only in amended (`qtb-run/4`) sessions: one entry per re-pinning of an unfinished cost stage to a later harness. `index`, `at`, `stage` (`cost`), `reason`, `hashes` (the coordinator and implementation identities the stage now requires, and the new `harness_wheel` hash), `session` (the replaced requirements, for example `cost_evidence`), `previous` (the replaced values, the cost status and the format), and `wheel` (the new harness wheel, `harness-wheel/amendments/<n>/`). Readers apply `session` everywhere and `hashes` only to the named stage; `hashes.harness` (the builds' wheel) never changes. A copy is in `stages/cost/amendment-<n>.json` |
 
 ## `stages/<stage>/state.json`
 
@@ -331,7 +334,7 @@ and outside its cleanup. Everything is written by `lsf/`, never by the harness.
 | Path | Format | Content |
 | --- | --- | --- |
 | `launch.json` | `qtb-lsf-launch/1` | The launcher's effective configuration: run ID, paths, profile, resources per job, the cost selector and hardware tier, the log level, the Python, the measurement identity |
-| `ledger.json` | `qtb-lsf-ledger/1` | The durable ledger: every job with its key, name and nonce, status (`reserved`, `submitted`, `ambiguous`, `unreconciled`, `rejected`, `terminal`), job ID, submissions, scheduler state, outcome and whether it consumed retry budget; cost exhaustion or stop; `decide` and cleanup results; one record per manager invocation |
+| `ledger.json` | `qtb-lsf-ledger/1` | The durable ledger: every job with its key, name and nonce, status (`reserved`, `submitted`, `ambiguous`, `unreconciled`, `rejected`, `terminal`), job ID, submissions, scheduler state, outcome and whether it consumed retry budget; cost exhaustion or stop; `decide` and cleanup results; one record per manager invocation. Each job records its `epoch`; `resumes` has one record per `--resume` (when, who, the unfinished stages, the new manager's key, the amendment if any, the launch values it replaced, and the previous epoch's `cost`, `decide`, `cleanup` and `result`), and `cost`, `decide`, `cleanup` and `result` describe the current epoch |
 | `outcomes/<job key>.json` | `qtb-lsf-outcome/1` | What a stage job reports: exit status, message, termination signal, the committed stage state (status, invocation, reason, contamination), host, times and its log files |
 | `report.md`, `report.json` | `qtb-lsf-report/1` | The orchestration report: jobs, cost attempts with their monitoring summaries and evidence paths, the retry budget, why the pipeline stopped, verdict and cleanup |
 | `orchestration.lock` | — | Held by the running manager (and by `lsf.control reap`) |

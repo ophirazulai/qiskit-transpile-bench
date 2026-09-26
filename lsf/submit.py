@@ -9,6 +9,18 @@ data: it must not exist yet, and ``compile`` creates it. The orchestration recor
 the sibling ``<results-root>.lsf/``. Allocations are fixed (16 slots, 9 exclusive cores for
 cost) and so is the internal limit of 20 cost noise retries. A successful submission means
 LSF accepted the manager, not that the benchmark finished.
+
+    uv run python lsf/submit.py --resume --results-root SESSION
+    uv run python lsf/submit.py --resume --upgrade-cost --reason TEXT --results-root SESSION
+
+``--resume`` continues a session this launcher started, after its manager ended: every
+unfinished stage gets one new job and cost a fresh retry budget (``lsf.retry`` epochs). The
+recorded inputs and resources are kept: other options may repeat them, not change them. It
+is refused when the session is cleaned, while a manager or any job of the session is still
+in LSF (``lsf.control stop``/``reap``), and when an unfinished stage is pinned to another
+harness than this one. ``--upgrade-cost`` first re-pins an unfinished cost stage, and only
+that, to this harness (``qtb.coordinator.amend``, recorded with ``--reason`` in
+``run.json:amendments``); a finished cost stage is never measured again.
 """
 
 if __name__ == "__main__" and not __package__:
@@ -28,13 +40,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from qtb.canonical import write_json
-from qtb.coordinator.storage import locked
+from qtb.canonical import read_json, write_json
+from qtb.coordinator.storage import LockBusy, locked
 
 from lsf import logging as log
 from lsf import lsf_directory, measurement_identity, retry
 from lsf.job import log_directory
-from lsf.scheduler import JobSpec, LsfBackend, slots, wall_seconds
+from lsf.scheduler import JobSpec, LsfBackend, QueryFailed, slots, wall_seconds
 
 EXIT_OK, EXIT_ERROR, EXIT_PRECONDITION, EXIT_USAGE = 0, 40, 41, 64
 PROFILES = ("iterations-profile", "confirm-profile")
@@ -81,14 +93,13 @@ def parser():
         description="Start one benchmark session on LSF: validate the configuration, then "
         "submit the manager job that runs every stage.",
         epilog="Exit status: 0 the manager was accepted, 41 a precondition is not met (an "
-        "existing session, a missing path or command), 40 the submission failed, 64 usage.",
+        "existing session, a missing path or command, a session that cannot be resumed), 40 "
+        "the submission failed, 64 usage.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     inputs = cli.add_argument_group("session inputs")
-    inputs.add_argument(
-        "--baseline", required=True, type=Path, help="baseline Qiskit source checkout"
-    )
-    inputs.add_argument("--evolved", required=True, type=Path, help="evolved Qiskit checkout")
+    inputs.add_argument("--baseline", type=Path, help="baseline Qiskit source checkout (required)")
+    inputs.add_argument("--evolved", type=Path, help="evolved Qiskit checkout (required)")
     inputs.add_argument("--profile", choices=PROFILES, default="iterations-profile")
     paths = cli.add_argument_group(
         "shared paths", "both on a filesystem mounted at the same path on every node"
@@ -139,6 +150,25 @@ def parser():
         default=DEFAULT_MAX_R1M,
         help="dispatch-time limit on the host's 1-minute run queue (select[r1m < L])",
     )
+    resume = cli.add_argument_group(
+        "resuming",
+        "Continue an existing session after its manager ended, with its recorded inputs and "
+        "resources: pass --results-root, and optionally --log-level; any other option must "
+        "repeat its recorded value.",
+    )
+    resume.add_argument(
+        "--resume",
+        action="store_true",
+        help="submit a new manager for the session's unfinished stages; cost gets a fresh "
+        "retry budget",
+    )
+    resume.add_argument(
+        "--upgrade-cost",
+        action="store_true",
+        help="with --resume: re-pin the unfinished cost stage, and only it, to this harness "
+        "(recorded in run.json:amendments; needs --reason)",
+    )
+    resume.add_argument("--reason", help="why cost is re-pinned (with --upgrade-cost)")
     logging_ = cli.add_argument_group("logging")
     logging_.add_argument(
         "--log-level",
@@ -165,6 +195,8 @@ def resolve(args, environ=None):
         raise Refused("pass --store DIR (or set QTB_STORE)")
     if not session:
         raise Refused("pass --results-root DIR, the new session's directory (or set QTB_SESSION)")
+    if args.baseline is None or args.evolved is None:
+        raise Refused("pass --baseline and --evolved, the checkouts to compare")
     store = Path(store).expanduser().resolve()
     session = Path(session).expanduser().resolve()
     _existing_directory(store, "The store")
@@ -242,12 +274,12 @@ def resolve(args, environ=None):
     }
 
 
-def manager_spec(config):
+def manager_spec(config, key="manager"):
     lsf_dir = Path(config["lsf_dir"])
     resources = config["resources"]["manager"]
     return JobSpec(
         kind="manager",
-        name=f"qtb-{config['run_id']}-manager",
+        name=f"qtb-{config['run_id']}-{key}",
         command=[config["python"], "-P", "-m", "lsf.manager", "--lsf-dir", str(lsf_dir)],
         queue=resources["queue"],
         mem_gb=resources["mem_gb"],
@@ -281,9 +313,13 @@ def _submit_locked(config, backend, lsf_dir):
         session=config["session"],
         lsf_dir=lsf_dir,
     )
-    spec = manager_spec(config)
+    return _submit_manager(config, backend, ledger, "manager")
+
+
+def _submit_manager(config, backend, ledger, key):
+    spec = manager_spec(config, key)
     argv = spec.argv()
-    ledger.reserve("manager", stage="manager", name=spec.name, command=argv, output=spec.output)
+    ledger.reserve(key, stage="manager", name=spec.name, command=argv, output=spec.output)
     log.event("submit.intent", log.quote(argv), job_name=spec.name, argv=argv)
     log.flush()
     result = backend.submit(spec)
@@ -296,7 +332,7 @@ def _submit_locked(config, backend, lsf_dir):
         seconds=result.seconds,
     )
     status = {"accepted": "submitted", "rejected": "rejected"}.get(result.outcome, "ambiguous")
-    ledger.update("manager", status=status, job_id=result.job_id)
+    ledger.update(key, status=status, job_id=result.job_id)
     log.flush()
     if result.outcome != "accepted":
         detail = (result.stdout + result.stderr).strip()
@@ -312,23 +348,281 @@ def _submit_locked(config, backend, lsf_dir):
     return result.job_id
 
 
+# Options a resume may pass; every other one keeps the recorded launch.
+RESUME_OPTIONS = {"results_root", "log_level", "resume", "upgrade_cost", "reason"}
+# The stage order a resume checks; unit-tests only when the launch runs it.
+STAGES = ("compile", "quality", "correctness", "unit-tests", "cost")
+# What a resume takes from the running launcher; the previous values are kept in the ledger.
+REFRESHED = ("python", "project", "measurement_identity", "log_level")
+
+
+def resume_target(args, environ=None):
+    """The orchestration directory of the session to resume; ``Refused`` when there is none."""
+    environ = os.environ if environ is None else environ
+    if args.upgrade_cost and not (args.reason or "").strip():
+        raise Refused("--upgrade-cost needs --reason: it is recorded in run.json:amendments")
+    session = args.results_root or environ.get("QTB_SESSION")
+    if not session:
+        raise Refused("pass --results-root DIR, the session to resume (or set QTB_SESSION)")
+    lsf_dir = lsf_directory(Path(session).expanduser().resolve())
+    for name in ("launch.json", "ledger.json"):
+        if not (lsf_dir / name).exists():
+            raise Refused(
+                f"{lsf_dir / name} does not exist: was this session launched with lsf/submit.py?",
+                EXIT_PRECONDITION,
+            )
+    changed = _changed(args, read_json(lsf_dir / "launch.json"))
+    if changed:
+        options = ", ".join("--" + k.replace("_", "-") for k in changed)
+        raise Refused(
+            f"--resume keeps the recorded launch; {options} "
+            f"{'differs' if len(changed) == 1 else 'differ'} from it and cannot be changed "
+            "(repeat the recorded values or omit them)"
+        )
+    return lsf_dir
+
+
+def _changed(args, launch):
+    """The options given with ``--resume`` whose values differ from the recorded launch.
+
+    An option left at its default is not given; one repeating the recorded value is not a
+    change either.
+    """
+    defaults = vars(parser().parse_args([]))
+    recorded = _recorded_options(launch)
+    return sorted(
+        k
+        for k, v in vars(args).items()
+        if k not in RESUME_OPTIONS and v != defaults[k] and _normal(v) != recorded.get(k)
+    )
+
+
+def _recorded_options(launch):
+    """The command-line value of each option, as recorded in ``launch``."""
+    selector = launch["cost_selector"]
+    options = {
+        "baseline": launch["baseline"],
+        "evolved": launch["evolved"],
+        "store": launch["store"],
+        "profile": launch["profile"],
+        "no_unit_tests": not launch["unit_tests"],
+        "cost_model": selector["model"],
+        "cost_ncpus": selector["ncpus"],
+        "cost_max_r1m": selector["max_r1m"],
+    }
+    queues = {launch["resources"][job]["queue"] for job in JOBS}
+    if len(queues) == 1:
+        options["queue"] = queues.pop()
+    for job in JOBS:
+        key, recorded = job.replace("-", "_"), launch["resources"][job]
+        options[f"{key}_queue"] = recorded["queue"]
+        options[f"{key}_mem_gb"] = recorded["mem_gb"]
+        options[f"{key}_wall"] = recorded["wall"]
+    return options
+
+
+def _normal(value):
+    return str(value.expanduser().resolve()) if isinstance(value, Path) else value
+
+
+def resume(args, backend, lsf_dir, environ=None, progress=print):
+    """Submit a new manager for the session; returns ``(launch, job ID, resume record)``."""
+    try:
+        with locked(lsf_dir / "orchestration.lock", wait=False):
+            return _resume_locked(args, backend, lsf_dir, environ, progress)
+    except LockBusy as exc:
+        raise Refused(
+            "a manager holds the session; stop it first (python -m lsf.control stop)",
+            EXIT_PRECONDITION,
+        ) from exc
+
+
+def _resume_locked(args, backend, lsf_dir, environ, progress):
+    from qtb.coordinator.stages import clean_status
+
+    environ = os.environ if environ is None else environ
+    launch = read_json(lsf_dir / "launch.json")
+    ledger = retry.Ledger.load(lsf_dir / "ledger.json")
+    session = Path(launch["session"])
+    if clean_status(session):
+        raise Refused(
+            f"{session} is cleaned (or cleaning); nothing can be measured again. "
+            f"`qtb decide --results-root {session}` replays its verdict",
+            EXIT_PRECONDITION,
+        )
+    _check_jobs_ended(ledger, backend, session)
+    pending = _unfinished(launch, session)
+    amendment = None
+    if args.upgrade_cost:
+        amendment = _upgrade_cost(launch, session, pending, args.reason, progress)
+    _check_harness(session, pending)
+    previous = {key: launch.get(key) for key in REFRESHED}
+    explicit = args.log_level or environ.get("LSF_LOG_LEVEL")
+    try:
+        level = log.resolve_level(args.log_level, environ) if explicit else launch["log_level"]
+    except ValueError as exc:
+        raise Refused(str(exc)) from exc
+    launch.update(
+        python=sys.executable,
+        project=str(Path(__file__).resolve().parents[1]),
+        measurement_identity=measurement_identity(),
+        log_level=level,
+    )
+    write_json(lsf_dir / "launch.json", launch)
+    key = f"manager-r{ledger.epoch + 1}"
+    logs = log_directory(lsf_dir, launch["run_id"])
+    log.setup(logs, f"resume-{ledger.epoch + 1}", level, "launcher")
+    log.bind(run_id=launch["run_id"], session=launch["session"])
+    record = ledger.begin_epoch(
+        manager=key,
+        pending=pending,
+        amendment=amendment["index"] if amendment else None,
+        launch={"previous": previous},
+    )
+    log.event(
+        "resume.started",
+        f"resume {record['index']}: {', '.join(pending) or 'decide'}",
+        resume=record,
+    )
+    return launch, _submit_manager(launch, backend, ledger, key), record
+
+
+def _check_jobs_ended(ledger, backend, session):
+    """Refused while any job of the session may still be in LSF; the managers are settled."""
+    reap = f"python -m lsf.control reap --results-root {session}"
+    for entry in ledger.jobs():
+        if entry["status"] not in retry.ACTIVE and entry["status"] != "unreconciled":
+            continue
+        if entry["stage"] != "manager":
+            raise Refused(
+                f"job {entry['key']} is {entry['status']} in the ledger; settle it first: {reap}",
+                EXIT_PRECONDITION,
+            )
+        try:
+            if entry.get("job_id"):
+                status = backend.query(entry["job_id"])
+                if status.state == "NOTFOUND":
+                    status = backend.history(entry["job_id"]) or status
+                found = [status]
+            else:
+                found = backend.find(entry["name"])
+        except QueryFailed as exc:
+            raise Refused(
+                f"cannot check the manager job {entry.get('job_id') or entry['name']}: {exc}",
+                EXIT_PRECONDITION,
+            ) from exc
+        live = [s for s in found if s.state != "NOTFOUND" and not s.terminal]
+        if live:
+            raise Refused(
+                f"the manager job {live[0].job_id} is still {live[0].state}; stop it first "
+                f"(python -m lsf.control stop --results-root {session})",
+                EXIT_PRECONDITION,
+            )
+        state = found[0].state if found else "NOTFOUND"
+        ledger.update(
+            entry["key"],
+            status="terminal",
+            scheduler={"state": state, "exit_code": getattr(found[0], "exit_code", None)}
+            if found
+            else {"state": state},
+            settled_at=retry.now(),
+        )
+
+
+def _unfinished(launch, session):
+    """The stages a new manager would run, in order."""
+    from qtb.coordinator.stages import FINAL, read_state
+
+    if not (session / "run.json").exists():
+        return list(STAGES if launch["unit_tests"] else [s for s in STAGES if s != "unit-tests"])
+    pending = []
+    for stage in STAGES:
+        if stage == "unit-tests" and not launch["unit_tests"]:
+            continue
+        state = read_state(session, stage)
+        if not state or state["status"] not in FINAL:
+            pending.append(stage)
+    return pending
+
+
+def _upgrade_cost(launch, session, pending, reason, progress):
+    from qtb.coordinator.amend import amend_cost
+    from qtb.errors import HarnessError
+
+    from lsf.cost_evidence import requirement
+
+    if not (session / "run.json").exists():
+        raise Refused("--upgrade-cost needs a compiled session", EXIT_PRECONDITION)
+    try:
+        return amend_cost(
+            session, {"cost_evidence": requirement(launch["tier"])}, reason, progress=progress
+        )
+    except HarnessError as exc:
+        raise Refused(f"--upgrade-cost: {exc}", EXIT_PRECONDITION) from exc
+
+
+def _check_harness(session, pending):
+    """Every unfinished stage must be pinned to this harness, or its stage job refuses."""
+    from qtb.config import coordinator_identity, implementation_identity
+    from qtb.coordinator.amend import effective
+
+    if not (session / "run.json").exists():
+        return
+    run = read_json(session / "run.json")
+    current = {"coordinator": coordinator_identity(), "implementation": implementation_identity()}
+    for stage in pending:
+        pinned = effective(run, stage)["hashes"]
+        differ = [k for k, v in current.items() if pinned.get(k) not in (None, v)]
+        if not differ:
+            continue
+        hint = (
+            "; or pass --upgrade-cost --reason TEXT to re-pin cost to this harness"
+            if pending == ["cost"]
+            else ""
+        )
+        raise Refused(
+            f"{stage} is pinned to another harness ({', '.join(differ)} identity differs); "
+            f"resume with the harness wheel archived in {session / 'harness-wheel'}{hint}",
+            EXIT_PRECONDITION,
+        )
+
+
 def main(argv=None, backend=None, environ=None):
     args = parser().parse_args(argv)
     backend = backend or LsfBackend()
+    record = None
     try:
-        config = resolve(args, environ)
+        if args.upgrade_cost and not args.resume:
+            raise Refused("--upgrade-cost re-pins an existing session: pass --resume too")
         missing = backend.missing_commands()
+        if args.resume:
+            lsf_dir = resume_target(args, environ)
+        else:
+            config = resolve(args, environ)
         if missing:
             raise Refused(
                 f"LSF commands not found: {', '.join(missing)}; run on a login node",
                 EXIT_PRECONDITION,
             )
-        job_id = submit(config, backend)
+        if args.resume:
+            config, job_id, record = resume(args, backend, lsf_dir, environ)
+        else:
+            job_id = submit(config, backend)
     except Refused as exc:
         print(f"{'ERROR' if exc.code == EXIT_ERROR else 'REFUSED'}: {exc}", file=sys.stderr)
         log.close()
         return exc.code
     logs = log_directory(config["lsf_dir"], config["run_id"])
+    # The manager numbers its logs by its start among all of the session's managers.
+    index = len(read_json(Path(config["lsf_dir"]) / "ledger.json")["managers"]) + 1
+    if record:
+        print(
+            f"Resume {record['index']} of {config['session']}: "
+            f"{', '.join(record['pending']) or 'no stage'} unfinished; the new manager runs "
+            "them, then decide"
+            + (f" (cost re-pinned: amendment {record['amendment']})" if record["amendment"] else "")
+            + "."
+        )
     print(
         "\n".join(
             [
@@ -336,7 +630,8 @@ def main(argv=None, backend=None, environ=None):
                 f"  session:      {config['session']}",
                 f"  run:          {config['run_id']}",
                 f"  logs:         {logs}",
-                f"  manager log:  {logs / 'manager-1.log'} (a requeued manager: manager-2.log)",
+                f"  manager log:  {logs / f'manager-{index}.log'} (a requeued manager: "
+                f"manager-{index + 1}.log)",
                 f"  ledger:       {Path(config['lsf_dir']) / 'ledger.json'}",
                 f"  report:       {Path(config['lsf_dir']) / 'report.md'}",
                 f"  watch:        bjobs -a -J 'qtb-{config['run_id']}-*'",

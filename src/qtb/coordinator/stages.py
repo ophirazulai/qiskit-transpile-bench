@@ -9,7 +9,9 @@
                       cost                        (skipped if correctness found a failure)
 
 Each stage owns ``stages/<stage>/``: ``state.json``, ``evidence.json`` and ``progress.log``,
-plus its own output files. ``run.json`` is written only by ``compile``. ``decide`` merges the
+plus its own output files. ``run.json`` is written only by ``compile``, and appended to only
+by ``amend_cost`` (``qtb.coordinator.amend``), which re-pins an unfinished cost stage to a
+later harness and records why. ``decide`` merges the
 evidence of committed stages; ``state.json: complete`` is the commit marker.
 
 Every stage takes a shared session lifecycle lock and an exclusive stage lock, checks that the
@@ -47,6 +49,7 @@ from qtb.coordinator import (
     same_build,
     worker_count,
 )
+from qtb.coordinator.amend import effective
 from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import LockBusy, append_record, locked, read_records
 from qtb.coordinator.store import resolve_store
@@ -579,7 +582,7 @@ def run_compile(baseline, evolved, profile, results_root, store=None, progress=p
         previous = read_state(root, "compile")
         if (root / "run.json").exists():
             # Other inputs are a usage error even when compile has finished.
-            run = read_json(root / "run.json")
+            run = effective(read_json(root / "run.json"))
             wanted = {
                 "sources": {
                     "baseline": str(Path(baseline).resolve()),

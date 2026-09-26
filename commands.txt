@@ -1,0 +1,19 @@
+
+uv run python lsf/submit.py   --store ./qtb-store \
+    --results-root ./qtb-sessions/aa-20260926  \
+    --baseline /u/ophirazu/projects/qiskit  \
+    --evolved /u/ophirazu/projects/qiskit \
+    --profile iterations-profile  \
+    --cost-ncpus 56  \
+    --cost-max-r1m 10
+
+
+uv run python lsf/submit.py --resume --upgrade-cost --store ./qtb-store \
+    --results-root ./qtb-sessions/aa-20260926 \
+    --baseline /u/ophirazu/projects/qiskit \
+    --evolved /u/ophirazu/projects/qiskit \
+    --profile iterations-profile \
+    --cost-ncpus 56 \
+    --cost-max-r1m 10 \
+    --reason "old monitor aborted cost on unmeasured windows; fixed thresholds in 78fd63f"
+

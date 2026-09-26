@@ -11,6 +11,7 @@ left in `src/qtb`, and no retry policy either.
 | Command | Runs where | Does |
 | --- | --- | --- |
 | `python lsf/submit.py` | login node | validates the configuration, writes `<session>.lsf/launch.json` and the ledger, submits the manager |
+| `python lsf/submit.py --resume [--upgrade-cost --reason ...]` | login node | continues an ended session's unfinished stages under a new manager, in a new ledger epoch; `--upgrade-cost` first re-pins an unfinished cost stage to the current harness ([resume](../docs/cluster.md#resume-a-session)) |
 | `python -P -m lsf.manager --lsf-dir D` | manager job | the pipeline: stage jobs, cost retries, inline `decide`, the clean job |
 | `python -P -m lsf.job --lsf-dir D --job-key K --stage S [--attempt N]` | each stage job | allocation → execution context, installs the monitor, runs one harness command, writes `outcomes/K.json` |
 | `python -m lsf.control status\|stop\|reap --results-root S` | login node | watch, stop, recover |

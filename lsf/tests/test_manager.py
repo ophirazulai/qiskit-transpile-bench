@@ -642,3 +642,107 @@ def test_missing_identity_fields_do_not_authorize_cancellation(world, tmp_path, 
     m.cancel_owned("stop", confirm_s=1)
     assert backend.cancelled == []
     assert m.ledger.job(key)["status"] == "submitted"
+
+
+def end_managers(backend, code=30):
+    """The fake scheduler never ends a manager job by itself."""
+    for job in backend.jobs.values():
+        if job["spec"].kind == "manager" and job["state"] not in {"DONE", "EXIT"}:
+            job["state"], job["exit"] = ("DONE" if code == 0 else "EXIT"), code
+
+
+def resume(session, backend, *extra):
+    argv = ["--resume", "--results-root", str(session), *extra]
+    return submit.main(argv, backend=backend, environ={})
+
+
+def exhausted(world, tmp_path, monkeypatch):
+    """A session whose cost retries ran out; the next measurement is clean."""
+    noisy(monkeypatch, failures=retry.MAX_COST_ATTEMPTS)
+    backend = FakeScheduler()
+    session, lsf_dir = launch(world, tmp_path, backend)
+    assert manager(lsf_dir, backend).run() == 30
+    return backend, session, lsf_dir
+
+
+def test_a_resume_after_exhaustion_gets_a_fresh_budget(world, tmp_path, monkeypatch, capsys):
+    backend, session, lsf_dir = exhausted(world, tmp_path, monkeypatch)
+    assert resume(session, backend) == 41
+    assert "still PEND" in capsys.readouterr().err  # the first manager is still in LSF
+    end_managers(backend)
+    assert resume(session, backend) == 0
+    out = capsys.readouterr().out
+    assert "Resume 1" in out and "cost unfinished" in out
+    assert backend.submitted[-1].name.endswith("-manager-r1")
+    before = len(backend.submitted)
+    assert manager(lsf_dir, backend, job_id="901").run() == 0
+    assert stages_of(backend)[before:] == ["cost", "clean"]  # finished stages never rerun
+    ledger = Ledger.load(lsf_dir / "ledger.json")
+    assert ledger.epoch == 1
+    (record,) = ledger.data["resumes"]
+    assert record["pending"] == ["cost"] and record["manager"] == "manager-r1"
+    assert record["previous"]["cost"]["exhausted"]["used"] == 21
+    assert record["previous"]["decide"]["status"] == "INCONCLUSIVE"
+    assert [e["attempt"] for e in ledger.cost_attempts()] == [22]
+    assert retry.budget_used(ledger) == 1
+    assert ledger.job("manager")["status"] == "terminal"
+    assert ledger.data["decide"]["status"] == "PASS"
+    assert ledger.data["cleanup"]["status"] == "complete"
+    report = (lsf_dir / "report.md").read_text()
+    assert "Resume 1" in report and "ended INCONCLUSIVE after 21 cost jobs" in report
+    assert "1 of 21 cost jobs used" in report
+    lines = []
+    control.main(["status", "--results-root", str(session)], backend, lines.append)
+    assert "resume 1" in lines[0]
+    end_managers(backend, 0)
+    assert resume(session, backend) == 41
+    assert "is cleaned" in capsys.readouterr().err
+
+
+def test_a_cost_pinned_to_an_older_harness_needs_upgrade_cost(world, tmp_path, monkeypatch, capsys):
+    def build(wheels, directory, log_path=None):
+        wheels.mkdir(parents=True, exist_ok=True)
+        (wheels / "qtb-0-py3-none-any.whl").write_bytes(b"harness")
+        return wheels / "qtb-0-py3-none-any.whl"
+
+    monkeypatch.setattr("qtb.coordinator.build_harness_wheel", build)
+    backend, session, lsf_dir = exhausted(world, tmp_path, monkeypatch)
+    end_managers(backend)
+    run = read_json(session / "run.json")
+    run["hashes"]["coordinator"] = "old-coordinator"
+    (session / "run.json").write_text(json.dumps(run))
+    assert resume(session, backend) == 41
+    err = capsys.readouterr().err
+    assert "cost is pinned to another harness" in err and "--upgrade-cost" in err
+    assert resume(session, backend, "--upgrade-cost") == 64
+    assert submit.main(["--upgrade-cost", "--reason", "x"], backend=backend, environ={}) == 64
+    assert resume(session, backend, "--baseline", str(tmp_path), "--cost-ncpus", "99") == 64
+    assert "--baseline, --cost-ncpus differ from it" in capsys.readouterr().err
+    launch = read_json(lsf_dir / "launch.json")
+    same = ["--baseline", launch["baseline"], "--evolved", launch["evolved"]]
+    same += ["--store", launch["store"], "--profile", launch["profile"]]
+    same += ["--cost-ncpus", str(launch["cost_selector"]["ncpus"])]
+    assert resume(session, backend, *same, "--upgrade-cost", "--reason", "monitor /2") == 0
+    (amendment,) = read_json(session / "run.json")["amendments"]
+    assert amendment["previous"]["hashes"]["coordinator"] == "old-coordinator"
+    assert set(amendment["session"]) == {"cost_evidence"}
+    assert amendment["reason"] == "monitor /2"
+    assert Ledger.load(lsf_dir / "ledger.json").data["resumes"][0]["amendment"] == 1
+    assert manager(lsf_dir, backend, job_id="901").run() == 0
+    ledger = Ledger.load(lsf_dir / "ledger.json")
+    assert any("Amendment 1" in note for note in ledger.data["decide"]["notes"])
+    assert read_state(session, "cost")["status"] == "complete"
+
+
+def test_a_resume_is_refused_while_the_session_is_busy(world, tmp_path, monkeypatch, capsys):
+    backend, session, lsf_dir = exhausted(world, tmp_path, monkeypatch)
+    end_managers(backend)
+    with locked(lsf_dir / "orchestration.lock"):
+        assert resume(session, backend) == 41
+    assert "a manager holds the session" in capsys.readouterr().err
+    ledger = Ledger.load(lsf_dir / "ledger.json")
+    ledger.reserve("cost-a99-left", stage="cost", attempt=99, name="qtb-left")
+    assert resume(session, backend) == 41
+    assert "lsf.control reap" in capsys.readouterr().err
+    assert resume(tmp_path / "sessions" / "nope", backend) == 41
+    assert Ledger.load(lsf_dir / "ledger.json").epoch == 0

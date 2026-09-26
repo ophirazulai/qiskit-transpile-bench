@@ -1,7 +1,7 @@
 """The manager job: one session's whole pipeline on LSF. ``python -P -m lsf.manager``.
 
-The launcher submits it once, with 16 slots. It holds the session's orchestration lock for
-its lifetime and never runs a stage body itself::
+The launcher submits it once per launch or resume, with 16 slots. It holds the session's
+orchestration lock for its lifetime and never runs a stage body itself::
 
     compile -> quality -> correctness + unit-tests (in parallel) -> cost (noise retries)
             -> decide (inline) -> clean (its own job, when the session is safe to clean)
@@ -21,6 +21,9 @@ confirmation. After a kill it cannot trap, ``python -m lsf.control reap`` does t
 
 If the manager is requeued, the new instance reconciles the ledger first: it adopts jobs
 that are still active and settles those that ended. The exit status is the verdict's.
+
+"Already ended" is per epoch (``lsf.retry``): after ``lsf/submit.py --resume`` every
+unfinished stage may run one new job and cost has a fresh retry budget.
 """
 
 import argparse
@@ -174,7 +177,9 @@ class Manager:
         resources = self.launch["resources"]
         log.event(
             "manager.started",
-            f"manager {index} for {self.session}",
+            f"manager {index} for {self.session}"
+            + (f" (resume {self.ledger.epoch})" if self.ledger.epoch else ""),
+            epoch=self.ledger.epoch,
             resources=resources,
             cost_selector=self.launch["cost_selector"],
             tier=self.launch["tier"],

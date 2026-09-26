@@ -52,3 +52,5 @@ design/
 # Local benchmark evidence and source/build archives
 results/
 repro/
+qtb-store/
+qtb-sessions/

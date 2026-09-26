@@ -94,10 +94,11 @@ def test_the_configuration_is_fixed_where_the_plan_fixes_it(paths):
         "execution",
         "cluster resources",
         "quiet-node selection",
+        "resuming",
         "logging",
     ):
         assert group in help_text
-    for absent in ("--dry-run", "--resume", "--name", "--max-retries", "--cost-slots"):
+    for absent in ("--dry-run", "--name", "--max-retries", "--cost-slots"):
         assert absent not in help_text
 
 
@@ -129,6 +130,9 @@ def test_a_tier_and_a_store_are_required(paths):
         resolve(arguments[2:])
     with pytest.raises(submit.Refused, match="is not an existing directory"):
         resolve(argv(paths, "--store", str(paths / "nope")))
+    at = arguments.index("--baseline")
+    with pytest.raises(submit.Refused, match="--baseline and --evolved"):
+        resolve(arguments[:at] + arguments[at + 2 :])
 
 
 def test_submission_records_intent_and_prints_where_to_look(paths, capsys):

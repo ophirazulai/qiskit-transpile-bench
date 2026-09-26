@@ -23,6 +23,12 @@ A retry avoids hosts that were noisy before (``excluded_hosts``): a host whose i
 foreign activity at once, one whose measurement was contaminated after a clean idle probe
 after ``HOST_NOISY_LIMIT`` such attempts. At most ``MAX_EXCLUDED_HOSTS``, the most recently
 noisy, are excluded, so the tier's pool is never exhausted by exclusions alone.
+
+A resume (``lsf/submit.py --resume``) starts a new epoch (``begin_epoch``): the previous
+epoch's cost accounting, verdict, cleanup and result are archived in ``resumes``, and the
+new epoch starts with a fresh budget, no excluded hosts and every unfinished stage allowed
+one new job. Every job entry records its epoch; only cancelling and reconciling look at
+all of them. Attempt numbers keep counting across epochs.
 """
 
 import getpass
@@ -45,8 +51,21 @@ ACTIVE = {"reserved", "submitted", "ambiguous"}
 CONSUMING = {"reserved", "submitted", "ambiguous", "unreconciled", "terminal"}
 
 
+# What one epoch owns; a resume archives these and starts over.
+EPOCH_KEYS = ("cost", "decide", "cleanup", "result")
+
+
 def now():
     return datetime.now(UTC).isoformat()
+
+
+def fresh_epoch():
+    return {
+        "cost": {"max_retries": MAX_COST_RETRIES, "exhausted": None, "stopped": None},
+        "decide": None,
+        "cleanup": None,
+        "result": None,
+    }
 
 
 class Ledger:
@@ -65,10 +84,7 @@ class Ledger:
             "created_at": now(),
             "managers": [],
             "jobs": {},
-            "cost": {"max_retries": MAX_COST_RETRIES, "exhausted": None, "stopped": None},
-            "decide": None,
-            "cleanup": None,
-            "result": None,
+            **fresh_epoch(),
         }
         ledger = cls(path, data)
         ledger.save()
@@ -84,11 +100,37 @@ class Ledger:
     def save(self):
         write_json(self.path, self.data)
 
+    # Epochs
+
+    @property
+    def epoch(self):
+        """The current epoch: 0 until the first resume."""
+        return len(self.data.get("resumes") or [])
+
+    def begin_epoch(self, **record):
+        """Archive the current epoch's accounting and start the next; returns its record."""
+        resumes = self.data.setdefault("resumes", [])
+        entry = {
+            "index": len(resumes) + 1,
+            "at": now(),
+            "user": getpass.getuser(),
+            **record,
+            "previous": {key: self.data.get(key) for key in EPOCH_KEYS},
+        }
+        resumes.append(entry)
+        self.data.update(fresh_epoch())
+        self.save()
+        return entry
+
     # Jobs
 
     def jobs(self, stage=None):
         entries = self.data["jobs"].values()
         return [e for e in entries if stage is None or e["stage"] == stage]
+
+    def current(self, stage=None):
+        """The stage's entries of the current epoch."""
+        return [e for e in self.jobs(stage) if e.get("epoch", 0) == self.epoch]
 
     def job(self, key):
         return self.data["jobs"][key]
@@ -105,6 +147,7 @@ class Ledger:
             "submissions": [],
             "outcome": None,
             "consumes_budget": None,
+            "epoch": self.epoch,
             **fields,
         }
         self.save()
@@ -116,8 +159,8 @@ class Ledger:
         return self.data["jobs"][key]
 
     def latest(self, stage):
-        """The stage's most recent entry that was not positively rejected."""
-        entries = [e for e in self.jobs(stage) if e["status"] != "rejected"]
+        """The stage's most recent entry of this epoch that was not positively rejected."""
+        entries = [e for e in self.current(stage) if e["status"] != "rejected"]
         return max(entries, key=lambda e: (e.get("attempt") or 0, e["reserved_at"]), default=None)
 
     def active(self):
@@ -126,8 +169,10 @@ class Ledger:
     # Cost attempts
 
     def cost_attempts(self):
+        """This epoch's cost attempts."""
         return sorted(
-            (e for e in self.jobs("cost") if e["status"] != "rejected"), key=lambda e: e["attempt"]
+            (e for e in self.current("cost") if e["status"] != "rejected"),
+            key=lambda e: e["attempt"],
         )
 
     def next_attempt(self):

@@ -35,6 +35,7 @@ from qtb.config import (
     implementation_identity,
     load_profile,
 )
+from qtb.coordinator.amend import effective
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.runlog import RunLog, depth, duration, step
 from qtb.coordinator.storage import (
@@ -234,6 +235,27 @@ def profile_prefix(profile):
     return "CA" if profile == "confirm-profile" else "IA"
 
 
+def build_harness_wheel(wheels, directory, log_path=None):
+    """The one wheel of the running harness in ``wheels``, built there when it is missing."""
+    wheels = Path(wheels)
+    wheels.mkdir(parents=True, exist_ok=True)
+    found = list(wheels.glob("*.whl"))
+    if not found:
+        project = Path(__file__).resolve().parents[3]
+        if (project / "pyproject.toml").exists():
+            command = ["uv", "build", "--wheel", "--out-dir", str(wheels), str(project)]
+            log_path = log_path or Path(directory) / "harness-build.log"
+            run_logged(command, directory, sanitized_environment(), log_path)
+        else:
+            from qtb.coordinator.wheel import repack_installed_harness
+
+            repack_installed_harness(wheels)
+        found = list(wheels.glob("*.whl"))
+    if len(found) != 1:
+        raise HarnessError("Expected exactly one harness wheel")
+    return found[0]
+
+
 def harness_wheel(directory):
     found = sorted((Path(directory) / "harness-wheel").glob("*.whl"))
     return found[0] if found else None
@@ -314,7 +336,7 @@ class Comparison:
         directory = Path(results_root).resolve()
         if not (directory / "run.json").exists():
             raise Precondition(f"{directory} is not a session; run compile first")
-        run = read_json(directory / "run.json")
+        run = effective(read_json(directory / "run.json"), stage)
         self = cls.__new__(cls)
         self._setup(directory, stage, run["profile"])
         self.run = run
@@ -323,8 +345,12 @@ class Comparison:
         return self
 
     def _check_harness(self):
-        """A stage runs with the harness that compiled its session, as ``--resume`` did."""
+        """A stage runs with the harness that compiled its session, or that it was re-pinned to
+        (``qtb.coordinator.amend``)."""
         wheel = harness_wheel(self.directory)
+        for amendment in self.run.get("amendments") or []:
+            if amendment["stage"] == self.stage:
+                wheel = self.directory / amendment["wheel"]
         hint = f"; install the archived harness wheel {wheel}" if wheel else ""
         if self.run["hashes"].get("coordinator") != coordinator_identity():
             raise Precondition(f"Harness code changed since compile{hint}")
@@ -350,7 +376,8 @@ class Comparison:
         self.progress = RunLog(self.stage_dir / "progress.log", progress)
 
     def save(self):
-        """``run.json`` has one writer: the compile stage."""
+        """``run.json`` has one writer here: the compile stage. (``amend_cost`` only appends
+        an amendment; other stages hold an amended view that is never written back.)"""
         if getattr(self, "stage", "compile") != "compile":
             raise HarnessError("Only the compile stage writes run.json")
         write_json(self.directory / "run.json", self.run)
@@ -402,27 +429,11 @@ class Comparison:
         self.progress(f"Scope: {self.run['scope']}")
         # Build the harness wheel once; its content hash enters observation cache keys.
         wheels = self.directory / "harness-wheel"
-        wheels.mkdir(exist_ok=True)
-        found = list(wheels.glob("*.whl"))
-        if not found:
+        if not list(wheels.glob("*.whl")):
             with step(self, "Build harness wheel"):
-                project = Path(__file__).resolve().parents[3]
-                if (project / "pyproject.toml").exists():
-                    command = ["uv", "build", "--wheel", "--out-dir", str(wheels), str(project)]
-                    run_logged(
-                        command,
-                        self.directory,
-                        sanitized_environment(),
-                        self.directory / "harness-build.log",
-                    )
-                else:
-                    from qtb.coordinator.wheel import repack_installed_harness
-
-                    repack_installed_harness(wheels)
-                found = list(wheels.glob("*.whl"))
-        if len(found) != 1:
-            raise HarnessError("Expected exactly one harness wheel")
-        self.run["hashes"]["harness"] = file_hash(found[0])
+                build_harness_wheel(wheels, self.directory, self.directory / "harness-build.log")
+        wheel = build_harness_wheel(wheels, self.directory)
+        self.run["hashes"]["harness"] = file_hash(wheel)
         self.run["hashes"]["implementation"] = implementation_identity()
         toolchain = baseline_toolchain(snapshots["baseline"])
         envs = self.data / "envs"
@@ -463,7 +474,7 @@ class Comparison:
                     directory,
                     identities["evolved"],
                     envs,
-                    found[0],
+                    wheel,
                     toolchain,
                     label="evolved",
                     progress=self.progress,
@@ -472,7 +483,7 @@ class Comparison:
 
         def baseline_build(level):
             return self.baseline_build(
-                snapshots["baseline"], identities["baseline"], found[0], toolchain, level, jobs
+                snapshots["baseline"], identities["baseline"], wheel, toolchain, level, jobs
             )
 
         # Both revisions are prepared concurrently: the final LTO step of one build leaves
@@ -491,7 +502,7 @@ class Comparison:
         if errors:
             raise errors[0]
         with step(self, "Verifier environment"):
-            self.build_verifier(found[0])
+            self.build_verifier(wheel)
         self.run["status"] = "built"
         self.save()
 

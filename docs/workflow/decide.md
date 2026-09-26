@@ -57,7 +57,9 @@ that appears in two stage evidence files is a harness error.
 
 It uses the session's archived `manifest.json` and `policy.json`, checked against the hashes
 in `run.json`, so it works with a newer harness and after `clean`. It never rewrites
-`run.json`.
+`run.json`. It applies every amendment of `run.json` (a cost stage re-pinned to a later
+harness, [cluster resume](../cluster.md#resume-a-session)) and notes each one, with its
+reason, in the verdict.
 
 Required stages are conditional: `compile` and `quality` always, `correctness` when the gate
 is `improved` or `aa`, `cost` when the gate is open and correctness found no failure, and

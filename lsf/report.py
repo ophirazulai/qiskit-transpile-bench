@@ -2,8 +2,8 @@
 
 It is produced from the ledger alone and lives outside the session, so it survives the
 session's cleanup. It links every job and cost attempt to its logs and evidence, shows the
-retry budget and says why the pipeline stopped. The verdict itself is in the session's
-``report.md`` and ``decision.json``.
+retry budget of the current epoch, every resume, and says why the pipeline stopped. The
+verdict itself is in the session's ``report.md`` and ``decision.json``.
 """
 
 from datetime import UTC, datetime
@@ -30,6 +30,7 @@ def _job(entry):
         "key": entry["key"],
         "stage": entry["stage"],
         "attempt": entry.get("attempt"),
+        "epoch": entry.get("epoch", 0),
         "name": entry.get("name"),
         "job_id": entry.get("job_id"),
         "status": entry["status"],
@@ -56,7 +57,7 @@ def build(manager):
     data = ledger.data
     jobs = sorted(
         (_job(e) for e in ledger.jobs() if e["stage"] != "manager"),
-        key=lambda j: (ORDER.index(j["stage"]), j["attempt"] or 0, j["key"]),
+        key=lambda j: (j["epoch"], ORDER.index(j["stage"]), j["attempt"] or 0, j["key"]),
     )
     decision = retry.decision(ledger)
     return {
@@ -66,9 +67,11 @@ def build(manager):
         "session": data["session"],
         "stop_reason": manager.stop_reason,
         "managers": data["managers"],
+        "epoch": ledger.epoch,
+        "resumes": data.get("resumes") or [],
         "jobs": jobs,
         "cost": {
-            "attempts": [j for j in jobs if j["stage"] == "cost"],
+            "attempts": [j for j in jobs if j["stage"] == "cost" and j["epoch"] == ledger.epoch],
             "used": decision["used"],
             "limit": decision["limit"],
             "remaining": decision["remaining"],
@@ -110,10 +113,24 @@ def render(content):
         f"`{content['links']['decision']}`",
         f"- Ledger: `{content['links']['ledger']}`; logs: `{content['links']['logs']}`",
         "",
+    ]
+    for resume in content.get("resumes") or []:
+        before = resume["previous"]
+        epoch = resume["index"] - 1
+        used = sum(1 for j in content["jobs"] if j["stage"] == "cost" and j["epoch"] == epoch)
+        lines.append(
+            f"- Resume {resume['index']} ({resume['at'][:19]}, {resume['user']}): "
+            f"{', '.join(resume['pending']) or 'no stage'} unfinished; the earlier epoch ended "
+            f"{(before.get('decide') or {}).get('status', 'undecided')} after "
+            f"{used} cost jobs"
+            + (f"; cost re-pinned (amendment {resume['amendment']})" if resume["amendment"] else "")
+        )
+    lines += [
+        "",
         "## Jobs",
         "",
-        "| Stage | Attempt | Job | Status | Outcome | Exit | Host | Reason | Output |",
-        "| --- | ---: | --- | --- | --- | ---: | --- | --- | --- |",
+        "| Epoch | Stage | Attempt | Job | Status | Outcome | Exit | Host | Reason | Output |",
+        "| ---: | --- | ---: | --- | --- | --- | ---: | --- | --- | --- |",
     ]
     for job in content["jobs"]:
         lines.append(
@@ -121,6 +138,7 @@ def render(content):
             + " | ".join(
                 _cell(v)
                 for v in (
+                    job["epoch"],
                     job["stage"],
                     job["attempt"],
                     job["job_id"],
@@ -137,7 +155,7 @@ def render(content):
     cost = content["cost"]
     lines += [
         "",
-        "## Cost attempts",
+        "## Cost attempts" + (f" (epoch {content['epoch']})" if content.get("epoch") else ""),
         "",
         f"{cost['used']} of {cost['limit']} cost jobs used (one initial job and up to "
         f"{cost['limit'] - 1} noise retries); {cost['remaining']} remain.",

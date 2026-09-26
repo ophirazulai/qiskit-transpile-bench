@@ -9,7 +9,8 @@ typed payloads, parameter trees, register order, and phase. Target hashes preser
 instruction insertion order. Gzip timestamps do not affect canonical identity.
 
 Session files are tagged as well: `run.json` is `qtb-run/3` (it records the store and, for
-monitored sessions, the required cost evidence, and is written only by `compile`), each
+monitored sessions, the required cost evidence, and is written only by `compile`; an
+amended session is `qtb-run/4`), each
 `stages/<stage>/state.json` is `qtb-stage/2`, and `clean.json` is `qtb-clean/1`. Their fields
 are listed in [output-format.md](output-format.md). A change to these fields requires a new
 tag.
@@ -20,6 +21,12 @@ tag.
 - `qtb-run/3` adds `cost_evidence`. `qtb-run/2` sessions are still read and decided; their
   cost bundles are machine-mode or unlabelled, and the report labels them as unmonitored.
   They are never promoted to monitored evidence, and an active session is never migrated.
+- `qtb-run/4` adds `amendments`: an unfinished cost stage re-pinned, with a reason, to a
+  later harness than the one that compiled. Only an amendment writes this tag; nothing is
+  migrated otherwise. A harness older than `/4` does not know amendments: it would check
+  cost against the compiled harness and the original `cost_evidence`, so continue an amended
+  session only with the harness of its latest amendment
+  (`harness-wheel/amendments/<n>/`) or a later one.
 
 ## The monitor contract
 

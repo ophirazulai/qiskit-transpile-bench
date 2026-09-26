@@ -4,7 +4,8 @@ It can run any time after ``compile`` created the session, as often as you like,
 ``clean``. It reads only committed evidence (``complete`` stages, and the crash record of a
 ``failed`` one) from a consistent snapshot of the stage states, under the shared lifecycle
 lock. It writes ``evidence.json``, ``decision.json``, ``report.md`` and ``progress.log`` and
-never rewrites ``run.json``.
+never rewrites ``run.json``. Every amendment of ``run.json`` (``qtb.coordinator.amend``) is
+applied and noted in the verdict.
 
 Required stages are conditional: ``compile`` and ``quality`` always; ``correctness`` when the
 gate is open; ``cost`` when the gate is open and correctness found no failure; ``unit-tests``
@@ -25,6 +26,8 @@ from pathlib import Path
 from qtb.canonical import atomic_bytes, digest, read_json, write_json
 from qtb.config import data_root, implementation_identity
 from qtb.coordinator import profile_prefix, stage_coverage
+from qtb.coordinator.amend import effective
+from qtb.coordinator.amend import notes as amendment_notes
 from qtb.coordinator.runlog import duration
 from qtb.coordinator.stages import (
     FINAL,
@@ -229,7 +232,7 @@ def decide(results_root, progress=print):
         raise Precondition(f"{root} is not a session; run compile first")
     with locked(root / "lifecycle.lock", shared=True):
         with locked(root / "stages" / "decide.lock"):
-            run = read_json(root / "run.json")
+            run = effective(read_json(root / "run.json"))
             states, hashes, by_stage = _snapshot(root)
             decision = _decide(root, run, states, hashes, by_stage)
             write_json(root / "evidence.json", decision.pop("_evidence"))
@@ -329,6 +332,7 @@ def _decide(root, run, states, hashes, by_stage):
     notes += _reuse_notes(states, store)
     if run["hashes"].get("implementation") not in {None, implementation_identity()}:
         notes.append("Decided by a different harness version than the one that compiled.")
+    notes += amendment_notes(run)
     session = {
         "status": "INCONCLUSIVE" if pending else None,
         "stages": _stage_rows(states, required),
