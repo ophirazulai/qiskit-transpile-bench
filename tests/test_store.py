@@ -124,6 +124,27 @@ def test_a_stored_build_must_point_only_inside_its_entry(tmp_path):
         store.ready_build("k")
 
 
+def test_a_stored_venv_interpreter_may_link_to_its_base_python(tmp_path):
+    store = Store(tmp_path / "store")
+    entry = store.build_dir("k")
+    (entry / "env/bin").mkdir(parents=True)
+    (entry / "source").mkdir()
+    (entry / "READY").write_text("x")
+    base = tmp_path / "uv/python/bin/python3.12"
+    base.parent.mkdir(parents=True)
+    base.write_text("")
+    (entry / "env/bin/python3.12").symlink_to(base)
+    (entry / "env/bin/python").symlink_to("python3.12")
+    build = {
+        "python": str(entry / "env/bin/python"),
+        "environment": str(entry / "env"),
+        "wheel": str(entry / "wheels/q.whl"),
+        "snapshot": {"path": str(entry / "source")},
+    }
+    write_json(entry / "build.json", build)
+    assert store.ready_build("k") == build
+
+
 def test_published_results_appear_atomically_and_first_wins(tmp_path):
     store = Store(tmp_path / "store")
 

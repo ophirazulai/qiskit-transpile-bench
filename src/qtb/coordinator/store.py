@@ -67,7 +67,9 @@ class Store:
             return None
         build = read_json(entry / "build.json")
         for field in ("python", "environment", "wheel"):
-            if not Path(build[field]).resolve().is_relative_to(entry):
+            # A venv's interpreter is a symlink to its base Python: resolve only its directory.
+            path = Path(build[field])
+            if not (path.parent.resolve() / path.name).is_relative_to(entry):
                 raise HarnessError(f"Stored build {key} points outside its entry: {field}")
         if Path(build["snapshot"]["path"]).resolve() != (entry / "source").resolve():
             raise HarnessError(f"Stored build {key} does not use its own source tree")
