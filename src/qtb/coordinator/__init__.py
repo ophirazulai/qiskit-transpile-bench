@@ -133,7 +133,7 @@ def same_build(builds):
     )
 
 
-def gate(builds, records):
+def gate(builds, records, required_quality=(), required_improvements=()):
     """Whether correctness, unit tests and cost run: ``(state, reason)``.
 
     ``records`` are the evaluated quality records together with the compile and quality
@@ -146,23 +146,34 @@ def gate(builds, records):
       a check of the harness;
     - ``closed``: anything else. The session is decided from the quality evidence alone.
     """
+    by_id = {r["id"]: r for r in records}
+    improvement_ids = set(required_improvements) or {
+        r["id"] for r in records if r["kind"] == "improvement"
+    }
     blocking = sorted(
         r["id"]
         for r in records
-        if r["kind"] != "improvement" and r["result"] not in {"passed", "not_evaluated"}
+        if r["kind"] != "improvement" and r["result"] != "passed"
     )
-    if "harness/roundtrip" not in {r["id"] for r in records}:
+    blocking += sorted(
+        f"{id_} (missing)"
+        for id_ in set(required_quality) - improvement_ids - by_id.keys()
+    )
+    if "harness/roundtrip" not in by_id and "harness/roundtrip" not in set(required_quality):
         blocking.insert(0, "harness/roundtrip (missing)")
-    improvements = [r for r in records if r["kind"] == "improvement"]
     if blocking:
         more = f" and {len(blocking) - 5} more" if len(blocking) > 5 else ""
         shown = ", ".join(blocking[:5]) + more
         return "closed", f"quality checks did not pass: {shown}"
-    if improvements and all(r["result"] == "passed" for r in improvements):
-        return "improved", "quality improved with every quality check passing"
     if same_build(builds):
         return "aa", "identical builds (A/A): later stages run as a harness check"
-    unresolved = [r["id"] for r in improvements if r["result"] != "failed"]
+    if improvement_ids and all(
+        by_id.get(id_, {}).get("result") == "passed" for id_ in improvement_ids
+    ) and all(r["result"] == "passed" for r in records if r["kind"] == "improvement"):
+        return "improved", "quality improved with every quality check passing"
+    unresolved = sorted(
+        id_ for id_ in improvement_ids if by_id.get(id_, {}).get("result") != "failed"
+    )
     if unresolved:
         return "closed", "improvement unresolved: " + ", ".join(unresolved)
     return "closed", "no improvement"
@@ -367,9 +378,15 @@ class Comparison:
         with step(self, "Snapshot sources"):
             for revision, source in self.run["sources"].items():
                 path = build_root / f"{revision}.snapshot.json"
-                snapshots[revision] = (
-                    read_json(path) if path.exists() else snapshot(source, build_root / revision)
-                )
+                if path.exists():
+                    snapshots[revision] = read_json(path)
+                else:
+                    destination = build_root / revision
+                    if destination.exists():
+                        # A killed snapshot can leave a partial tree before its manifest
+                        # is committed. It cannot be used as a source for a build.
+                        shutil.rmtree(destination)
+                    snapshots[revision] = snapshot(source, destination)
         self.run["changed_paths"] = diff_snapshots(snapshots["baseline"], snapshots["evolved"])
         self.run["scope"] = {
             str(level): changed_scope(self.run["changed_paths"], level) for level in range(4)

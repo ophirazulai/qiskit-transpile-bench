@@ -13,6 +13,8 @@ stage gives ``ERROR`` through its ``harness/error/<stage>`` record. The verdict 
 unchanged; these rules are applied around it.
 """
 
+import hashlib
+import json
 from pathlib import Path
 
 from qtb.canonical import atomic_bytes, digest, read_json, write_json
@@ -23,9 +25,7 @@ from qtb.coordinator.stages import (
     FINAL,
     STAGE_ORDER,
     baseline_correctness_key,
-    committed_evidence,
     cost_due,
-    read_state,
     stage_path,
     state_hash,
 )
@@ -48,11 +48,37 @@ def _archived_profile(root, run):
 
 
 def _snapshot(root):
-    """States, their hashes and committed evidence, read while no stage can commit or clean."""
-    states = {stage: read_state(root, stage) for stage in STAGE_ORDER}
-    hashes = {stage: state_hash(root, stage) for stage in STAGE_ORDER}
-    evidence = {stage: committed_evidence(root, stage) for stage in STAGE_ORDER}
-    return states, hashes, evidence
+    """Read one stable view even while shared-lock stage writers finish or retry."""
+
+    def reject_number(value):
+        raise HarnessError(f"Invalid stage state number: {value}")
+
+    while True:
+        states, hashes = {}, {}
+        for stage in STAGE_ORDER:
+            path = stage_path(root, stage, "state.json")
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                states[stage], hashes[stage] = None, None
+                continue
+            states[stage] = json.loads(content, parse_constant=reject_number)
+            hashes[stage] = hashlib.sha256(content).hexdigest()
+        evidence = {}
+        for stage, state in states.items():
+            if state is None or state["status"] not in {"complete", "failed"}:
+                evidence[stage] = []
+                continue
+            path = stage_path(root, stage, "evidence.json")
+            rows = read_json(path) if path.exists() else []
+            if state["status"] == "complete":
+                evidence[stage] = rows
+            else:
+                evidence[stage] = [
+                    row for row in rows if row["id"] == f"harness/error/{stage}"
+                ]
+        if hashes == {stage: state_hash(root, stage) for stage in STAGE_ORDER}:
+            return states, hashes, evidence
 
 
 def _status(state):
@@ -212,7 +238,8 @@ def _decide(root, run, states, hashes, by_stage):
     preflight_failed = any(
         r["id"] == "baseline/preflight" and r["result"] == "failed" for r in evidence
     )
-    rows = read_records(root / "observations.jsonl")
+    # A running quality stage owns this append-only file. Its partial rows are not evidence.
+    rows = read_records(root / "observations.jsonl") if _status(quality) == "complete" else []
     if preflight_failed:
         keep = {"compile", "correctness"}
         evidence = [r for r in evidence if seen[r["id"]] in keep or r["kind"] == "harness"]

@@ -16,7 +16,7 @@ import pytest
 from qtb.canonical import digest, file_hash, read_json, write_json
 from qtb.cli import main
 from qtb.config import STAGES, implementation_identity, load_profile
-from qtb.coordinator import Comparison, worker_count
+from qtb.coordinator import Comparison, gate, worker_count
 from qtb.coordinator.clean import clean
 from qtb.coordinator.decide import decide
 from qtb.coordinator.stages import read_state, run_compile, run_stage, skip_reason
@@ -309,6 +309,49 @@ def test_unresolved_audit_closes_the_gate_also_on_aa(world, evolved):
     assert verdict(root)[1]["status"] == "INCONCLUSIVE"
 
 
+@pytest.mark.parametrize("evolved", ["idea", "main"])
+def test_not_evaluated_quality_check_closes_the_gate(world, evolved):
+    world.knobs.audit = "not_evaluated"
+    root, _ = compile_(world, evolved=evolved)
+    chain(root)
+    assert read_state(root, "quality")["gate"] == "closed"
+    assert status(root, "correctness") == "skipped"
+    assert status(root, "cost") == "skipped"
+
+
+def test_gate_needs_every_non_improvement_record_to_pass():
+    records = [
+        record("harness/roundtrip", "harness", "passed"),
+        record("IA2/improvement", "improvement", "passed"),
+        record("audit/determinism", "completeness", "not_evaluated"),
+    ]
+    assert gate({}, records)[0] == "closed"
+
+
+def test_gate_rejects_missing_required_quality_records_and_preserves_aa():
+    records = [
+        record("harness/roundtrip", "harness", "passed"),
+        record("IA2/improvement", "improvement", "passed"),
+    ]
+    required = {"harness/roundtrip", "IA1/C0", "IA2/improvement"}
+    assert gate({}, records, required, {"IA2/improvement"})[0] == "closed"
+    records.append(record("IA1/C0", "correctness", "passed"))
+    builds = {"baseline": {"id": "same"}, "evolved": {"id": "same"}}
+    assert gate(builds, records, required, {"IA2/improvement"})[0] == "aa"
+
+
+def test_quality_stage_closes_gate_when_required_check_is_missing(world, monkeypatch):
+    def incomplete_aggregate(self, cases, rows):
+        self.evidence(record("IA1/C6", "correctness", "passed"))
+        self.evidence(record("IA6/completeness", "completeness", "passed"))
+
+    monkeypatch.setattr(Comparison, "aggregate_checks", incomplete_aggregate)
+    root, _ = compile_(world)
+    run_stage(root, "quality", progress=QUIET)
+    assert read_state(root, "quality")["gate"] == "closed"
+    assert "IA1/C0 (missing)" in read_state(root, "quality")["gate_reason"]
+
+
 def test_aa_session_runs_every_stage(world):
     root, _ = compile_(world, evolved="main")
     chain(root)
@@ -405,9 +448,35 @@ def test_a_killed_stage_resumes(world):
     run_stage(root, "quality", progress=QUIET)
     state = read_state(root, "quality")
     write_json(root / "stages/quality/state.json", dict(state, status="running"))
-    assert verdict(root)[1]["status"] == "INCONCLUSIVE"
+    decision = verdict(root)[1]
+    assert decision["status"] == "INCONCLUSIVE"
+    assert decision["objective"] == []  # partial quality rows do not count
     assert run_stage(root, "quality", progress=QUIET) == 0
     assert status(root, "quality") == "complete"
+
+
+def test_decide_retries_a_state_transition_during_snapshot(world, monkeypatch):
+    import qtb.coordinator.decide as decision_module
+
+    root, _ = compile_(world)
+    run_stage(root, "quality", progress=QUIET)
+    original = decision_module.state_hash
+    changed = False
+
+    def hash_with_transition(directory, stage):
+        nonlocal changed
+        if not changed:
+            changed = True
+            state = read_state(root, "quality")
+            write_json(root / "stages/quality/state.json", dict(state, status="running"))
+        return original(directory, stage)
+
+    monkeypatch.setattr(decision_module, "state_hash", hash_with_transition)
+    states, hashes, evidence = decision_module._snapshot(root)
+    assert changed
+    assert states["quality"]["status"] == "running"
+    assert evidence["quality"] == []
+    assert hashes["quality"] == file_hash(root / "stages/quality/state.json")
 
 
 def test_compile_checks_its_session_directory(world, capsys):
@@ -421,6 +490,10 @@ def test_compile_checks_its_session_directory(world, capsys):
     (busy / "notes.txt").write_text("mine")
     with pytest.raises(Usage, match="not a session"):
         compile_(world, name="other")
+    empty = world.root / "sessions/empty"
+    empty.mkdir()
+    with pytest.raises(Usage, match="not a session"):
+        compile_(world, name="empty")
     code = main(
         [
             "compile", "--baseline", str(world.sources["main"]),
@@ -446,6 +519,26 @@ def test_compile_resumes_its_unfinished_session(world):
     root, code = compile_(world)
     assert code == 0 and status(root, "compile") == "complete"
     assert read_state(root, "compile")["attempts"] == 2
+
+
+def test_compile_repairs_a_snapshot_killed_before_its_manifest(world, monkeypatch):
+    root = world.root / "sessions/snapshot"
+    comparison = Comparison.create(
+        world.sources["main"], world.sources["idea"], "iterations-profile",
+        root, world.store, QUIET,
+    )
+    partial = root / "builds/baseline"
+    partial.mkdir(parents=True)
+    (partial / "partial.txt").write_text("interrupted copy")
+
+    def interrupted_snapshot(source, destination):
+        assert destination == partial
+        assert not destination.exists()
+        raise HarnessError("snapshot restarted")
+
+    monkeypatch.setattr("qtb.coordinator.snapshot", interrupted_snapshot)
+    with pytest.raises(HarnessError, match="snapshot restarted"):
+        comparison._build()
 
 
 def test_store_flag_wins_over_environment(world, monkeypatch, tmp_path):

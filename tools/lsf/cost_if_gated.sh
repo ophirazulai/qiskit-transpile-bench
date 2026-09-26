@@ -18,7 +18,7 @@ R=$1
 COST_MODEL=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
 PROJECT=$(cd "$HERE/../.." && pwd)
-Q="uv run --project $PROJECT qiskit-transpile-bench"
+Q=(uv run --project "$PROJECT" qiskit-transpile-bench)
 
 REASON=$(uv run --project "$PROJECT" python -c '
 import sys
@@ -28,13 +28,13 @@ print(skip_reason(sys.argv[1], "cost") or "")
 
 if [[ -n "$REASON" ]]; then
     echo "cost will be skipped: $REASON"
-    exec $Q cost --results-root "$R"
+    exec "${Q[@]}" cost --results-root "$R"
 fi
 
 set +e
 bsub -K -x -n 1 -R "select[model==$COST_MODEL]" -J "kx-$(basename "$R")" \
      -o "$(dirname "$R")/lsf/$(basename "$R").cost.%J.out" \
-     $Q cost --results-root "$R"
+     "${Q[@]}" cost --results-root "$R"
 STATUS=$?
 set -e
 echo "cost job ended with status $STATUS"

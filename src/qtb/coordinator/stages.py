@@ -147,13 +147,29 @@ def quality_body(comparison):
         comparison.audit(cases, rows)
     with step(comparison, "Aggregate checks"):
         comparison.aggregate_checks(cases, rows)
-    records, _, _ = evaluate_quality(
+    records, required_ids, _ = evaluate_quality(
         comparison.manifest,
         comparison.policy,
         rows,
         comparison.committed("compile") + comparison.records,
     )
-    state, reason = gate(comparison.run["builds"], records)
+    prefix = comparison.prefix
+    required_quality = {
+        id_
+        for id_ in required_ids
+        if id_ in {
+            "harness/roundtrip",
+            "audit/determinism",
+            f"{prefix}1/C0",
+            f"{prefix}1/C6",
+            f"{prefix}1/C1-lite",
+        }
+        or id_.startswith((f"{prefix}2/", f"{prefix}3/", f"{prefix}4/", f"{prefix}6/"))
+    }
+    improvement_ids = {f"{prefix}2/improvement"}
+    if prefix == "CA":
+        improvement_ids.add("CA3/breadth")
+    state, reason = gate(comparison.run["builds"], records, required_quality, improvement_ids)
     comparison.progress(f"Gate: {state}: {reason}.")
     reused = sorted({r["cached_from"] for r in rows if r.get("cached_from")})
     return {
@@ -474,15 +490,15 @@ def run_stage(results_root, stage, progress=print):
         return _execute(comparison, previous, progress)
 
 
-def _check_session_directory(root):
+def _check_session_directory(root, *, creating=False):
     if root.exists() and not root.is_dir():
         raise Usage(f"{root} exists and is not a directory")
     if root.is_dir() and not (root / "run.json").exists():
         extra = sorted(p.name for p in root.iterdir() if p.name not in SESSION_SEED)
-        if extra:
+        if extra or not creating:
+            contents = f" (it contains {', '.join(extra[:3])})" if extra else ""
             raise Usage(
-                f"{root} exists and is not a session (it contains {', '.join(extra[:3])}); "
-                "choose a new --results-root"
+                f"{root} exists and is not a session{contents}; choose a new --results-root"
             )
 
 
@@ -493,7 +509,7 @@ def run_compile(baseline, evolved, profile, results_root, store=None, progress=p
     _check_session_directory(root)
     root.mkdir(parents=True, exist_ok=True)
     with session_locks(root, "compile"):
-        _check_session_directory(root)
+        _check_session_directory(root, creating=True)
         refuse_cleaned(root)
         previous = read_state(root, "compile")
         if (root / "run.json").exists():
@@ -523,4 +539,3 @@ def run_compile(baseline, evolved, profile, results_root, store=None, progress=p
 def session_summary(root):
     """Every stage's state, for the report and for ``clean``'s consistency check."""
     return {stage: read_state(root, stage) for stage in STAGE_ORDER}
-
