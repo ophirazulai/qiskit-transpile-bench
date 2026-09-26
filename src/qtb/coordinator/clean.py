@@ -13,6 +13,12 @@ afterwards; every other stage exits 41.
 Every planned deletion is recorded in ``clean.json`` (a file's SHA-256, or a directory's
 size and a digest of its listing) under ``status: cleaning`` before anything is deleted. A
 killed ``clean`` resumes from that list.
+
+Cleanup is ``decide``'s default follow-up (``after_decide``), whatever the verdict. It is
+skipped, with its reason, while a stage is unfinished (``running`` or ``noisy``) or a stage
+the verdict requires has not started, and ``clean`` itself refuses a session whose stages
+changed since the last ``decide``. The follow-up is a hook: by default the session is cleaned
+in this process; a scheduler entry point may instead run ``clean`` as its own job.
 """
 
 import os
@@ -21,7 +27,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qtb.canonical import digest, read_json, write_json
-from qtb.coordinator.stages import STAGE_ORDER, read_state, state_hash
+from qtb.coordinator.stages import (
+    FINAL,
+    STAGE_ORDER,
+    UNFINISHED,
+    clean_status,
+    read_state,
+    state_hash,
+)
 from qtb.coordinator.storage import (
     LockBusy,
     locked,
@@ -93,11 +106,12 @@ def _clean(root, progress):
         return 0
     if state is None:
         states = {stage: read_state(root, stage) for stage in STAGE_ORDER}
-        running = [s for s, v in states.items() if v and v["status"] == "running"]
+        running = [s for s, v in states.items() if v and v["status"] in UNFINISHED]
         if running:
             raise Precondition(
-                f"{', '.join(running)} did not finish (a killed job leaves 'running'); "
-                "run it again to a final state, then decide, then clean"
+                f"{', '.join(running)} did not finish (a killed job leaves 'running', "
+                "detected interference 'noisy'); run it again to a final state, then decide, "
+                "then clean"
             )
         decision_file = root / "decision.json"
         if not decision_file.exists():
@@ -130,3 +144,53 @@ def _clean(root, progress):
     write_json(path, state)
     progress(f"Cleaned {root}: freed {freed / 2**30:.2f} GiB in {len(state['planned'])} items.")
     return 0
+
+
+def cleanup_blocker(root, decision):
+    """Why ``decide``'s automatic cleanup must not run now, or ``None``."""
+    root = Path(root)
+    if clean_status(root) == "complete":
+        return "the session is already clean"
+    unfinished = [
+        f"{stage} ({state['status']})"
+        for stage in STAGE_ORDER
+        if (state := read_state(root, stage)) and state["status"] in UNFINISHED
+    ]
+    unfinished += [
+        f"{row['stage']} ({row['status']})"
+        for row in decision.get("stages", [])
+        if row.get("required")
+        and row["status"] not in FINAL | {"failed"} | UNFINISHED
+    ]
+    if unfinished:
+        return "unfinished stages: " + ", ".join(unfinished)
+    return None
+
+
+def clean_here(root, progress=print):
+    """The default follow-up: clean the session in this process."""
+    try:
+        clean(root, progress)
+    except Precondition as exc:
+        return {"status": "skipped", "reason": str(exc)}
+    return {"status": "complete"}
+
+
+def after_decide(root, decision, progress=print, cleanup=None):
+    """Clean the session after ``decide`` unless a safety check refuses; never raises.
+
+    ``cleanup(root, progress)`` carries it out (``clean_here`` by default) and returns
+    ``{"status": "complete" | "skipped" | "failed", "reason": ...}``. The verdict is not
+    changed by the outcome, which is reported separately.
+    """
+    try:
+        blocker = cleanup_blocker(root, decision)
+        if blocker:
+            progress(f"Cleanup skipped: {blocker}.")
+            return {"status": "skipped", "reason": blocker}
+        result = (cleanup or clean_here)(root, progress)
+    except Exception as exc:
+        result = {"status": "failed", "reason": str(exc)}
+    if result["status"] != "complete":
+        progress(f"Cleanup {result['status']}: {result.get('reason')}")
+    return result

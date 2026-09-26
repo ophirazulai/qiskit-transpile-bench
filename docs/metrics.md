@@ -166,11 +166,13 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   warms up (`warmups` = 1 call) and times every case of the panel in manifest order, timing
   each until at least `minimum_calls` (2) calls and `minimum_ns` (1 s) have accumulated; the
   companion and memory use one fresh process per arm and case. The two arms (baseline,
-  evolved) run interleaved in random order within each round. Nothing else may run: the
-  `cost` stage takes an exclusive runner lock and waits up to 5 minutes for the load average
-  to fall below half the core count; if it does not, the result is `unresolved`. On a
-  cluster the stage should also have an exclusive host (`bsub -x`); the lock and the wait
-  are a second line of defence.
+  evolved) run interleaved in random order within each round. Nothing else may run on the
+  measured core. On LSF the stage holds nine exclusive physical cores, and a monitor checks
+  every window of every worker for foreign CPU activity and involuntary preemption; the first
+  failing window discards the invocation (`noisy`) and the manager measures again in a new
+  job ([cost](workflow/cost.md#measurement-modes)). Run directly, the stage takes an
+  exclusive runner lock and waits up to 5 minutes for the load average to fall below half
+  the core count; if it does not, the result is `unresolved`.
 - **Thresholds** (`policy.json` → `cost_thresholds`), the same for every runner:
   `panel_ratio` 1.03, `case_ratio` 1.10, `case_floor_ns` 25 ms, `case_floor_bytes` 32 MiB,
   `screen_fraction` 0.5. Every cost bundle records the digest of this block
@@ -186,7 +188,7 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   measured once more with doubled rounds. A breach again → `failed`; a pass →
   `passed_on_rerun`.
 
-Cost is its own stage, `cost`, because it needs a quiet, exclusive host and can take hours
+Cost is its own stage, `cost`, because it needs quiet, exclusive cores and can take hours
 of wall time. It runs after `correctness` and only when the quality gate is open
 ([quality gate](workflow/quality.md#the-quality-gate)): the candidate improved and every quality check passed, or the run is an A/A run
 (both builds have the same ID) and every quality check passed. An A/A run never improves, but

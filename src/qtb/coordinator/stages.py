@@ -16,18 +16,28 @@ Every stage takes a shared session lifecycle lock and an exclusive stage lock, c
 session is not cleaned, loads ``run.json`` with the harness check of ``Comparison.open``,
 checks its store entry, its prerequisites, the gate and the host, and only then writes
 ``running``. A finished stage (``complete`` or ``skipped``) never runs again in its session;
-a ``running`` (killed) or ``failed`` stage resumes.
+a ``running`` (killed), ``failed`` or ``noisy`` stage resumes.
+
+``noisy`` means a measurement extension positively detected interference and aborted the
+stage (``Contaminated``). It is unfinished, like ``running``: nothing it measured is
+committed, ``decide`` treats it as pending and ``clean`` refuses the session. Whether to run
+the stage again is decided by whoever orchestrates it, never here.
+
+The stage runs under the installed ``qtb.execution`` context, which supplies the scheduler
+record, the worker count and the invocation identity. Each state records its invocation,
+and every invocation's outcome is appended to ``stages/<stage>/invocations.jsonl``.
 
 A stage's exit status reports whether it ran, not what it found: 0 for ``complete`` or
-``skipped``, 40 when the stage failed, 41 when a precondition is not met, 64 for usage.
+``skipped``, 40 when the stage failed, 41 when a precondition is not met, 42 when it ended
+``noisy``, 64 for usage.
 """
 
-import os
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from qtb import execution
 from qtb.canonical import digest, file_hash, read_json, write_json
 from qtb.coordinator import (
     Comparison,
@@ -41,7 +51,7 @@ from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import LockBusy, append_record, locked, read_records
 from qtb.coordinator.store import resolve_store
 from qtb.envbuild import SERIAL, host_mismatch
-from qtb.errors import HarnessError, Incomplete, Precondition, Usage
+from qtb.errors import Contaminated, HarnessError, Incomplete, Precondition, Usage
 from qtb.evaluator import evaluate_quality, record
 
 STAGE_ORDER = ("compile", "quality", "correctness", "unit-tests", "cost")
@@ -54,8 +64,12 @@ PREREQUISITES = {
 }
 GATED = {"correctness", "unit-tests", "cost"}
 FINAL = {"complete", "skipped"}
-STATE_FORMAT = "qtb-stage/1"
-EXIT_OK, EXIT_ERROR, EXIT_PRECONDITION, EXIT_USAGE = 0, 40, 41, 64
+# Started and not finished: a killed invocation (running) or a contaminated one (noisy).
+UNFINISHED = {"running", "noisy"}
+# qtb-stage/2 adds the noisy status and the invocation field; /1 states are still read.
+STATE_FORMAT = "qtb-stage/2"
+STATE_FORMATS = {"qtb-stage/1", STATE_FORMAT}
+EXIT_OK, EXIT_ERROR, EXIT_PRECONDITION, EXIT_NOISY, EXIT_USAGE = 0, 40, 41, 42, 64
 # Files at the top of a directory that compile is still creating.
 SESSION_SEED = {"lifecycle.lock", "stages"}
 
@@ -69,7 +83,12 @@ def stage_path(root, stage, name):
 
 def read_state(root, stage):
     path = stage_path(root, stage, "state.json")
-    return read_json(path) if path.exists() else None
+    if not path.exists():
+        return None
+    state = read_json(path)
+    if state.get("format", "qtb-stage/1") not in STATE_FORMATS:
+        raise HarnessError(f"Unknown stage state format {state.get('format')} in {path}")
+    return state
 
 
 def state_hash(root, stage):
@@ -92,11 +111,6 @@ def committed_evidence(root, stage):
 def clean_status(root):
     path = Path(root) / "clean.json"
     return read_json(path).get("status") if path.exists() else None
-
-
-def scheduler_info():
-    names = ("LSB_JOBID", "LSB_QUEUE", "LSB_HOSTS", "LSB_MCPU_HOSTS", "LSB_DJOB_NUMPROC")
-    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 @contextmanager
@@ -309,8 +323,7 @@ def cost_due(root, run, manifest, policy):
 def skip_reason(root, stage, run=None, manifest=None, policy=None):
     """Why a gated stage records ``skipped`` instead of running, or ``None``.
 
-    Callable without a ``Comparison`` (``tools/lsf/cost_if_gated.sh`` uses it), in which
-    case the session's archived profile is read.
+    Callable without a ``Comparison``, in which case the session's archived profile is read.
     """
     quality = read_state(root, "quality")
     if quality is None or quality["status"] != "complete":
@@ -334,6 +347,8 @@ def skip_reason(root, stage, run=None, manifest=None, policy=None):
 def cost_body(comparison):
     from qtb.coordinator.costs import measure_costs
 
+    # Every panel is judged again: saved bundles are reused, records are not.
+    comparison.reset_evidence()
     due = cost_due(comparison.directory, comparison.run, comparison.manifest, comparison.policy)
     if due == "aa":
         comparison.progress("Identical builds: measuring cost panels as an A/A check.")
@@ -375,25 +390,51 @@ def _write_state(root, stage, state):
     write_json(stage_path(root, stage, "state.json"), dict(state, format=STATE_FORMAT, stage=stage))
 
 
+def _record_invocation(root, stage, state, code):
+    """One line per invocation that reached a final or resumable state."""
+    append_record(
+        stage_path(root, stage, "invocations.jsonl"),
+        {
+            "status": state["status"],
+            "exit": code,
+            "invocation": state.get("invocation"),
+            "started_at": state.get("started_at"),
+            "finished_at": state.get("finished_at"),
+            "host": state.get("machine", {}).get("host"),
+            "reason": state.get("reason"),
+        },
+    )
+
+
 def _skip(comparison, previous, reason):
     comparison.progress(f"{comparison.stage}: skipped: {reason}.")
     now = datetime.now(UTC).isoformat()
-    _write_state(
-        comparison.directory,
-        comparison.stage,
-        {
-            "status": "skipped",
-            "started_at": now,
-            "finished_at": now,
-            "seconds": 0,
-            "attempts": (previous or {}).get("attempts", 0),
-            "machine": comparison.machine,
-            "scheduler": scheduler_info(),
-            "inputs": _inputs(comparison),
-            "reason": reason,
-        },
-    )
+    state = {
+        "status": "skipped",
+        "started_at": now,
+        "finished_at": now,
+        "seconds": 0,
+        "attempts": (previous or {}).get("attempts", 0),
+        "machine": comparison.machine,
+        "scheduler": execution.current().scheduler,
+        "invocation": execution.current().invocation,
+        "inputs": _inputs(comparison),
+        "reason": reason,
+    }
+    _write_state(comparison.directory, comparison.stage, state)
+    _record_invocation(comparison.directory, comparison.stage, state, EXIT_OK)
     return EXIT_OK
+
+
+def _check_cost_measurement(comparison):
+    """A session that requires monitored cost evidence is measured only under its monitor."""
+    requirement = comparison.run.get("cost_evidence")
+    monitor = execution.current().cost_monitor
+    if requirement and getattr(monitor, "contract", None) != requirement.get("contract"):
+        raise Precondition(
+            f"This session admits only cost evidence of {requirement.get('contract')}; "
+            f"run cost through its measurement entry point ({requirement.get('entry_point')})"
+        )
 
 
 def _preconditions(comparison, previous):
@@ -427,6 +468,8 @@ def _preconditions(comparison, previous):
             problem = host_mismatch(build)
             if problem:
                 raise Precondition(f"This host cannot run the {revision} build: {problem}")
+    if stage == "cost":
+        _check_cost_measurement(comparison)
     return None
 
 
@@ -441,16 +484,32 @@ def _execute(comparison, previous, progress):
         "started_at": started,
         "attempts": (previous or {}).get("attempts", 0) + 1,
         "machine": comparison.machine,
-        "scheduler": scheduler_info(),
+        "scheduler": execution.current().scheduler,
+        "invocation": execution.current().invocation,
         "inputs": _inputs(comparison),
         "workers": worker_count(),
     }
+    monitor = execution.current().cost_monitor if stage == "cost" else None
+    prepared = None
+    if monitor is not None:
+        # The monitor checks the allocation and probes the idle measurement core before any
+        # timed worker runs. A refused allocation leaves the state as it was.
+        try:
+            monitor.prepare(comparison)
+        except Precondition:
+            raise
+        except Exception as exc:  # ends the invocation noisy or failed, like the body
+            prepared = exc
     _write_state(root, stage, state)
     # The retried attempt's crash record is gone from memory; commit that now.
     write_json(comparison.evidence_path, comparison.records)
     try:
+        if prepared is not None:
+            raise prepared
         fields = BODIES[stage](comparison)
         status, code = "complete", EXIT_OK
+    except Contaminated as exc:  # interference, not a crash: nothing is committed
+        fields, status, code = _contaminated(exc, progress, stage)
     except Exception as exc:  # any crash fails the stage; a kill leaves it running
         detail = str(exc) if isinstance(exc, HarnessError) else f"{type(exc).__name__}: {exc}"
         comparison.evidence(record(f"harness/error/{stage}", "harness", "failed", detail=detail))
@@ -469,8 +528,14 @@ def _execute(comparison, previous, progress):
         steps=[dict(s) for s in getattr(comparison.progress, "steps", [])],
     )
     _write_state(root, stage, state)
+    _record_invocation(root, stage, state, code)
     progress(f"{stage}: {status} ({root})")
     return code
+
+
+def _contaminated(exc, progress, stage):
+    progress(f"NOISY {stage}: {exc}")
+    return {"reason": str(exc), "contamination": exc.evidence}, "noisy", EXIT_NOISY
 
 
 def run_stage(results_root, stage, progress=print):
@@ -522,6 +587,7 @@ def run_compile(baseline, evolved, profile, results_root, store=None, progress=p
                 },
                 "store": str(store),
                 "profile": profile,
+                **execution.current().session,
             }
             differ = [k for k, v in wanted.items() if run.get(k) != v]
             if differ:

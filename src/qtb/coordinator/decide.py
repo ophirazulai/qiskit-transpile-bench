@@ -11,6 +11,11 @@ gate is open; ``cost`` when the gate is open and correctness found no failure; `
 once it has started. A required stage that has not finished gives ``INCONCLUSIVE``; a failed
 stage gives ``ERROR`` through its ``harness/error/<stage>`` record. The verdict function is
 unchanged; these rules are applied around it.
+
+A ``noisy`` stage is unfinished: its last invocation was discarded because interference was
+detected. The report says so, separately from any observed cost regression. Replayed cost
+bundles must satisfy the session's ``cost_evidence`` requirement, also after ``clean``; the
+report labels which kind of cost evidence the session holds.
 """
 
 import hashlib
@@ -164,6 +169,33 @@ def _stored_baseline_note(root, run, policy, states, store):
     )
 
 
+def _cost_evidence_note(root, run):
+    """Which kind of cost evidence the verdict rests on; unmonitored results stay labelled."""
+    requirement = run.get("cost_evidence")
+    if requirement:
+        return (
+            f"Cost evidence: monitored ({requirement.get('contract')}); every bundle is "
+            f"checked by {requirement.get('validator')}."
+        )
+    modes = set()
+    for path in sorted((root / "cost").glob("*/*.json")):
+        try:
+            modes.add(read_json(path).get("measurement_mode", "unlabelled"))
+        except (HarnessError, OSError, AttributeError):
+            continue
+    if "unlabelled" in modes:
+        return (
+            "Cost evidence: unmonitored, from a harness that did not label its measurement "
+            "mode; it is not monitored evidence."
+        )
+    if modes - {"machine"}:
+        return (
+            f"Cost evidence: {', '.join(sorted(modes))} mode, but this session requires no "
+            "evidence contract, so no monitoring evidence was validated."
+        )
+    return "Cost evidence: machine mode (machine lock and load checks; no monitoring contract)."
+
+
 def _progress_log(root, states):
     """Stage logs in graph order, then one table of every stage's step durations."""
     parts = []
@@ -279,6 +311,15 @@ def _decide(root, run, states, hashes, by_stage):
             notes.append(note)
     if _status(unit_tests) in {"not started", "skipped"}:
         notes.append("Upstream tests: not run.")
+    for stage in STAGE_ORDER:
+        if _status(states[stage]) == "noisy":
+            notes.append(
+                f"{stage}: no clean measurement. The last invocation detected interference "
+                f"and was discarded ({states[stage].get('reason')}); this is not an observed "
+                "regression."
+            )
+    if _status(states["cost"]) == "complete":
+        notes.append(_cost_evidence_note(root, run))
     if pending:
         notes.append(
             "Unfinished required stages: "

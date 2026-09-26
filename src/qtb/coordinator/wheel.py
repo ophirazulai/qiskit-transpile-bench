@@ -13,9 +13,10 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from qtb.config import HARNESS_PACKAGES
 from qtb.errors import HarnessError
 
-PACKAGES = ("qtb", "qtb_worker", "qtb_verifier")
+PACKAGES = HARNESS_PACKAGES
 
 
 def _record_hash(data):
@@ -87,6 +88,7 @@ def repack_installed_harness(destination):
         "qtb/__init__.py",
         "qtb_worker/__init__.py",
         "qtb_verifier/__init__.py",
+        "lsf/__init__.py",
         "qtb/data/profiles/iterations-profile/manifest.json",
         "qtb/data/profiles/confirm-profile/manifest.json",
         f"{info_dir}/METADATA",

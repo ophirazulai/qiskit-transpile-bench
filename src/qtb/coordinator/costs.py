@@ -1,19 +1,36 @@
-"""Exclusive, interleaved fresh two-arm cost sessions judged by policy thresholds."""
+"""Exclusive, interleaved fresh two-arm cost sessions judged by policy thresholds.
+
+Two measurement modes, recorded in every bundle as ``measurement_mode``:
+
+- ``machine`` (no extension installed): the stage holds the per-user machine lock
+  exclusively and waits for the host's load average to fall, as on a dedicated machine.
+- the mode of an installed cost monitor (``qtb.execution``), such as the LSF monitor's
+  ``cores``: the monitor has verified an exclusive-core allocation, observes every worker
+  through ``run_worker``'s lifecycle hooks and adds its evidence to the bundle
+  (``monitor``). The machine lock and the load-average checks do not apply: they describe
+  the whole host, not the allocated cores. A monitor that detects interference raises
+  ``Contaminated``, which ends the stage ``noisy`` instead of recording unresolved evidence.
+
+A session whose ``run.json`` names ``cost_evidence`` admits only bundles that satisfy that
+extension, when a bundle is reused and when ``decide`` replays it.
+"""
 
 import os
 import random
 import time
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
+from qtb import execution
 from qtb.canonical import digest, read_json, write_json
 from qtb.config import STAGES
 from qtb.coordinator.process import run_worker
 from qtb.coordinator.runlog import step
 from qtb.coordinator.storage import locked, runner_lock
 from qtb.envbuild import machine_identity
-from qtb.errors import HarnessError, Incomplete
+from qtb.errors import Contaminated, HarnessError, Incomplete
 from qtb.evaluator import record
 from qtb.evaluator.cost import (
     MEASURED_ARMS,
@@ -117,10 +134,7 @@ def _too_busy():
 
 
 def _wait_until_quiet(timeout_s=300, poll_s=10):
-    """Let the one-minute load average decay before measuring; a second line of defence.
-
-    On a cluster the cost stage should already have an exclusive host (``bsub -x``).
-    """
+    """Machine mode: let the one-minute load average decay before measuring."""
     deadline = time.monotonic() + timeout_s
     while _too_busy():
         if time.monotonic() >= deadline:
@@ -157,8 +171,21 @@ def timing_batch_job(cases, fixture_root, measurement_protocol):
 
 
 def collect_panel(
-    run, builds, cases, estimator, directory, count, arms, fixture_root, measurement_protocol
+    run,
+    builds,
+    cases,
+    estimator,
+    directory,
+    count,
+    arms,
+    fixture_root,
+    measurement_protocol,
+    monitor=None,
 ):
+    """Measure one regime in a fresh session; the bundle is complete or not returned.
+
+    A contaminated session is left in place with ``contaminated.json`` and never reused.
+    """
     session = uuid.uuid4().hex
     rng_seed = interleaving_seed(run["run_id"], cases, estimator, count, arms)
     rng = random.Random(rng_seed)
@@ -171,11 +198,17 @@ def collect_panel(
         for arm in arms
     }
     arm_ids = {arm: uuid.uuid4().hex for arm in arms}
+    worker_jobs = []
 
     def collect(arm, job, job_id, expected):
-        if _too_busy():
-            raise Incomplete("Machine became busy during cost measurement")
-        results = run_worker(builds[arm], job, session_directory / job_id)
+        if monitor is None:
+            if _too_busy():
+                raise Incomplete("Machine became busy during cost measurement")
+            results = run_worker(builds[arm], job, session_directory / job_id)
+        else:
+            hooks = monitor.worker_hooks(job_id)
+            results = run_worker(builds[arm], job, session_directory / job_id, hooks=hooks)
+        worker_jobs.append({"job": job_id, "arm": arm})
         by_seed = {result["seed"]: result for result in results}
         if len(results) != len(expected) or set(by_seed) != set(expected):
             raise Incomplete(f"Incomplete cost worker batch: {job_id}")
@@ -184,62 +217,27 @@ def collect_panel(
                 raise Incomplete(f"Cost worker failed: {by_seed[seed].get('error')}")
         return by_seed
 
-    with locked(runner_lock()):
-        _wait_until_quiet()
-        for round_ in range(count):
-            if estimator == "timing":
-                # A timing round is one fresh process per arm running the whole
-                # panel. Arms are interleaved per round in random order.
-                order = list(arms)
-                rng.shuffle(order)
-                job = timing_batch_job(cases, fixture_root, measurement_protocol)
-                for arm in order:
-                    by_index = collect(arm, job, f"{round_}-batch-{arm}", job["seeds"])
-                    for index, case in enumerate(cases):
-                        samples[arm][case["case_id"]].append(by_index[index]["samples_ns"])
-                continue
-            for case in cases:
-                seeds = (
-                    list(range(20))
-                    if estimator == "companion"
-                    else [case.get("timing", {}).get("fixed_seed", 0)]
-                )
-                # A companion round is one fresh process per arm and case. The
-                # worker builds a pass manager outside the clock for each seed,
-                # then emits a heartbeat after each measured seed. Memory is one
-                # fresh process per arm and case, so peak RSS is that compile's.
-                order = list(arms)
-                rng.shuffle(order)
-                for arm in order:
-                    job_id = f"{round_}-{digest(case['case_id'])[:12]}-{arm}"
-                    mode = "memory" if estimator == "memory" else "timing_reuse"
-                    job = {
-                        "mode": mode,
-                        "case": case,
-                        "seeds": seeds,
-                        "fixture_root": str(fixture_root),
-                        "timeout_s": max(120, case["timeout_s"] * 5),
-                    }
-                    if mode != "memory":
-                        job.update(
-                            warmups=measurement_protocol["warmups"],
-                            minimum_calls=measurement_protocol["minimum_calls"],
-                            minimum_ns=measurement_protocol["minimum_ns"],
-                        )
-                    by_seed = collect(arm, job, job_id, seeds)
-                    for seed in seeds:
-                        result = by_seed[seed]
-                        value = (
-                            result["peak_rss_bytes"]
-                            if estimator == "memory"
-                            else result["samples_ns"]
-                        )
-                        entry = samples[arm][case["case_id"]]
-                        if estimator == "companion":
-                            entry.setdefault(str(seed), []).append(value)
-                        else:
-                            entry.append(value)
-    return {
+    if monitor is not None:
+        monitor.begin_bundle(session)
+    try:
+        with locked(runner_lock()) if monitor is None else nullcontext():
+            if monitor is None:
+                _wait_until_quiet()
+            _measure_rounds(
+                cases,
+                estimator,
+                count,
+                arms,
+                rng,
+                samples,
+                collect,
+                fixture_root,
+                measurement_protocol,
+            )
+    except Contaminated as exc:
+        write_json(session_directory / "contaminated.json", {"reason": str(exc), **exc.evidence})
+        raise
+    bundle = {
         "session_id": session,
         "arms": {
             arm: {
@@ -262,7 +260,71 @@ def collect_panel(
             name: measurement_protocol[name]
             for name in ("warmups", "minimum_calls", "minimum_ns")
         },
+        "measurement_mode": "machine" if monitor is None else monitor.mode,
+        "worker_jobs": worker_jobs,
     }
+    if monitor is not None:
+        bundle["monitor"] = monitor.end_bundle(session)
+    return bundle
+
+
+def _measure_rounds(
+    cases, estimator, count, arms, rng, samples, collect, fixture_root, measurement_protocol
+):
+    """Every round of one regime, arms interleaved in the seeded random order."""
+    for round_ in range(count):
+        if estimator == "timing":
+            # A timing round is one fresh process per arm running the whole
+            # panel. Arms are interleaved per round in random order.
+            order = list(arms)
+            rng.shuffle(order)
+            job = timing_batch_job(cases, fixture_root, measurement_protocol)
+            for arm in order:
+                by_index = collect(arm, job, f"{round_}-batch-{arm}", job["seeds"])
+                for index, case in enumerate(cases):
+                    samples[arm][case["case_id"]].append(by_index[index]["samples_ns"])
+            continue
+        for case in cases:
+            seeds = (
+                list(range(20))
+                if estimator == "companion"
+                else [case.get("timing", {}).get("fixed_seed", 0)]
+            )
+            # A companion round is one fresh process per arm and case. The
+            # worker builds a pass manager outside the clock for each seed,
+            # then emits a heartbeat after each measured seed. Memory is one
+            # fresh process per arm and case, so peak RSS is that compile's.
+            order = list(arms)
+            rng.shuffle(order)
+            for arm in order:
+                job_id = f"{round_}-{digest(case['case_id'])[:12]}-{arm}"
+                mode = "memory" if estimator == "memory" else "timing_reuse"
+                job = {
+                    "mode": mode,
+                    "case": case,
+                    "seeds": seeds,
+                    "fixture_root": str(fixture_root),
+                    "timeout_s": max(120, case["timeout_s"] * 5),
+                }
+                if mode != "memory":
+                    job.update(
+                        warmups=measurement_protocol["warmups"],
+                        minimum_calls=measurement_protocol["minimum_calls"],
+                        minimum_ns=measurement_protocol["minimum_ns"],
+                    )
+                by_seed = collect(arm, job, job_id, seeds)
+                for seed in seeds:
+                    result = by_seed[seed]
+                    value = (
+                        result["peak_rss_bytes"]
+                        if estimator == "memory"
+                        else result["samples_ns"]
+                    )
+                    entry = samples[arm][case["case_id"]]
+                    if estimator == "companion":
+                        entry.setdefault(str(seed), []).append(value)
+                    else:
+                        entry.append(value)
 
 
 def panel_weights(cases, estimator):
@@ -275,12 +337,17 @@ def panel_weights(cases, estimator):
     }
 
 
-def measure_panel(run, builds, cases, estimator, directory, fixture_root, policy, guarded=True):
+def measure_panel(
+    run, builds, cases, estimator, directory, fixture_root, policy, guarded=True, monitor=None
+):
     """Screen, then measure in full, then rerun once; each regime a fresh session.
 
     A clear screen ends the panel early. A report-only panel never pays for a
     rerun, but does complete the full measurement when its screen is unclear.
+    A saved regime bundle is reused only when it is complete and admissible, including
+    the session's required evidence; any other bundle is measured again from scratch.
     """
+    requirement = run.get("cost_evidence")
     protocol = policy["measurement_protocol"]
     weights = panel_weights(cases, estimator)
     counts = regime_counts(estimator, protocol)
@@ -292,7 +359,7 @@ def measure_panel(run, builds, cases, estimator, directory, fixture_root, policy
         bundle = read_json(saved) if saved.exists() else None
         if bundle is not None:
             try:
-                validate_bundle(bundle, policy, estimator, weights, run["run_id"])
+                validate_bundle(bundle, policy, estimator, weights, run["run_id"], requirement)
             except Incomplete:
                 bundle = None
         if bundle is None:
@@ -306,10 +373,11 @@ def measure_panel(run, builds, cases, estimator, directory, fixture_root, policy
                 list(MEASURED_ARMS),
                 fixture_root,
                 protocol,
+                monitor,
             )
             bundle.update(regime=regime, thresholds_id=thresholds_id(policy))
         write_json(saved, bundle)
-        result = cost_guard(bundle, policy, estimator, weights, run["run_id"])
+        result = cost_guard(bundle, policy, estimator, weights, run["run_id"], requirement)
         results.append(result)
         if regime == "screen" and result.get("needs_full"):
             continue
@@ -320,6 +388,8 @@ def measure_panel(run, builds, cases, estimator, directory, fixture_root, policy
 
 
 def measure_costs(comparison):
+    """Every cost panel; ``Contaminated`` from the monitor ends the stage, never a panel."""
+    monitor = execution.current().cost_monitor
     guarded = required_cost_panels(comparison)
     for name, (cases, estimator) in cost_panels(comparison).items():
         comparison.progress(f"Measuring {name}: fresh interleaved baseline/evolved arms.")
@@ -334,6 +404,7 @@ def measure_costs(comparison):
                     comparison.fixtures,
                     comparison.policy,
                     guarded=name in guarded,
+                    **({"monitor": monitor} if monitor is not None else {}),
                 )
         except Incomplete as exc:
             if name in guarded:
@@ -410,7 +481,9 @@ def replay_costs(directory, run, manifest, policy, evidence):
                     for a in MEASURED_ARMS
                 ):
                     raise Incomplete("Cost bundle build identities changed")
-                return bundle, cost_guard(bundle, policy, estimator, weights, run["run_id"])
+                return bundle, cost_guard(
+                    bundle, policy, estimator, weights, run["run_id"], run.get("cost_evidence")
+                )
 
             previous = None
             if "screen" in counts:

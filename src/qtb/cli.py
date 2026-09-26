@@ -6,7 +6,9 @@ Each command does one stage against one session directory (``--results-root``)::
     quality | correctness | unit-tests | cost | decide | clean   [--results-root DIR]
 
 Stage exit statuses: 0 complete or skipped, 40 the stage failed, 41 a precondition is not
-met, 64 usage. ``decide`` exits with the verdict's status (0, 10, 20, 30 or 40).
+met, 42 the stage detected interference and ended ``noisy``, 64 usage. ``decide`` exits with
+the verdict's status (0, 10, 20, 30 or 40), then cleans the session unless a safety check
+refuses; a cleanup problem is reported on stderr and never changes that status.
 """
 
 import argparse
@@ -53,7 +55,7 @@ def parser():
         "correctness": "C1-C5, API contracts and C7 (only when the gate is open)",
         "unit-tests": "optional upstream Python and Rust tests (only when the gate is open)",
         "cost": "timing and memory panels on a quiet host (gate open, correctness passed)",
-        "decide": "merge the evidence and write the verdict and report",
+        "decide": "merge the evidence, write the verdict and report, then clean",
         "clean": "delete the session's bulk after decide, keeping its results",
     }
     for name, text in helps.items():
@@ -62,34 +64,54 @@ def parser():
     return cli
 
 
-def main(argv=None):
-    args = parser().parse_args(argv)
+def invoke(command, results_root, *, baseline=None, evolved=None, profile=None, store=None):
+    """Run one command; returns ``(exit status, message)`` with the CLI's status mapping.
+
+    ``message`` is the problem shown on stderr, or ``None``. Scheduler entry points call this
+    under their own execution context (``qtb.execution``).
+    """
     try:
-        if args.command == "compile":
-            return run_compile(
-                args.baseline, args.evolved, args.profile, args.results_root, args.store
-            )
-        if args.command in STAGE_COMMANDS:
-            return run_stage(args.results_root, args.command)
-        if args.command == "decide":
+        if command == "compile":
+            return run_compile(baseline, evolved, profile, results_root, store), None
+        if command in STAGE_COMMANDS:
+            return run_stage(results_root, command), None
+        if command == "decide":
+            from qtb import execution
+            from qtb.coordinator.clean import after_decide
             from qtb.coordinator.decide import decide
 
-            code, _ = decide(args.results_root)
-            return code
-        if args.command == "clean":
+            code, decision = decide(results_root)
+            after_decide(
+                results_root,
+                decision,
+                progress=lambda line: print(line, file=sys.stderr),
+                cleanup=execution.current().cleanup,
+            )
+            return code, None
+        if command == "clean":
             from qtb.coordinator.clean import clean
 
-            return clean(args.results_root)
-        raise Usage(f"Unknown command {args.command}")
+            return clean(results_root), None
+        raise Usage(f"Unknown command {command}")
     except Usage as exc:
-        print(f"USAGE: {exc}", file=sys.stderr)
-        return EXIT_USAGE
+        return EXIT_USAGE, f"USAGE: {exc}"
     except Precondition as exc:
-        print(f"PRECONDITION: {exc}", file=sys.stderr)
-        return EXIT_PRECONDITION
+        return EXIT_PRECONDITION, f"PRECONDITION: {exc}"
     except (HarnessError, OSError, ValueError, KeyError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+        return EXIT_ERROR, f"ERROR: {exc}"
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    extra = {}
+    if args.command == "compile":
+        extra = dict(
+            baseline=args.baseline, evolved=args.evolved, profile=args.profile, store=args.store
+        )
+    code, message = invoke(args.command, args.results_root, **extra)
+    if message:
+        print(message, file=sys.stderr)
+    return code
 
 
 if __name__ == "__main__":

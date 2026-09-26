@@ -2,8 +2,8 @@
 
 [Documentation index](../README.md) · [← decide](decide.md)
 
-Reclaim one session’s bulk while retaining its results. Cleanup is optional and final for
-measurement stages.
+Reclaim one session’s bulk while retaining its results. Cleanup is `decide`'s default
+follow-up and is final for measurement stages.
 
 ## Run this step
 
@@ -11,17 +11,22 @@ measurement stages.
 uv run qiskit-transpile-bench clean --results-root "$S"
 ```
 
-`S` is the session directory chosen at `compile`. Run `decide` after the last stage
-transition first. A running stage or stale decision makes cleanup exit 41. Cleanup can run
-on any host and ignores the verdict. See [session rules](../sessions.md) for prerequisites,
-retries and stage exit codes.
+`S` is the session directory chosen at `compile`. You rarely need this command: `decide`
+cleans the session after writing the verdict ([cleanup afterwards](decide.md#cleanup-afterwards)),
+and on LSF the manager submits `clean` as its own 16-slot job. Run it yourself after a
+skipped automatic cleanup, once the unfinished stage is finished and decided. A running or
+noisy stage, or a stale decision, makes cleanup exit 41. Cleanup can run on any host and
+ignores the verdict. See [session rules](../sessions.md) for prerequisites, retries and
+stage exit codes.
 
 ## Scope and retained results
 
 `clean` works on one session and never touches the store. It runs only after `decide` has
-seen every stage's final state: it refuses (exit 41) while a stage is running (a killed job
-must be run again to a final state first), before `decide`, and when a stage changed after
-the last `decide`, for example when `unit-tests` was started later. It ignores the verdict.
+seen every stage's final state: it refuses (exit 41) while a stage is `running` (a killed job
+must be run again to a final state first) or `noisy` (its measurement must be repeated),
+before `decide`, and when a stage changed after the last `decide`, for example when
+`unit-tests` was started later. It ignores the verdict. The automatic cleanup after `decide`
+is also skipped while a stage the verdict requires has not started.
 
 - **Deletes:** the evolved build, the source snapshots, the verifier and its cache, worker
   scratch directories, `oracle-jobs/`, the copied upstream test trees and their
@@ -29,8 +34,9 @@ the last `decide`, for example when `unit-tests` was started later. It ignores t
   the policy's `output_retention_bytes`. Failing or unverified outputs are kept.
 - **Keeps:** `run.json`, the archived profile, `harness-wheel/`, `stages/`, `evidence.json`,
   `decision.json`, `report.md`, the logs, `observations.jsonl`, `correctness.jsonl`,
-  `clifford.jsonl`, `cost/`, `changed-tests.json`, every `job.json` and the snapshot
-  manifests.
+  `clifford.jsonl`, `cost/` (with the monitoring evidence and diagnostics), `changed-tests.json`,
+  every `job.json` and the snapshot manifests. The LSF records in `<session>.lsf/` are
+  outside the session and never cleaned.
 
 `clean` records every planned deletion in `clean.json` before deleting anything, and a
 killed `clean` resumes from that list when run again. It prints the space freed. Afterwards

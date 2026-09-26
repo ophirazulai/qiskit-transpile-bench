@@ -44,6 +44,12 @@ not measurements of an evolved Qiskit revision.
 - One-pass structural metrics/hash/legality, `clean` pruning of verified outputs above 8 MB,
   runner-wide exclusion of quality jobs during cost measurements, and batched routing prefixes.
 - CI and an opt-in controlled-runner workflow with archived evidence.
+- LSF orchestration under `lsf/`: a launcher, a manager job that runs every stage as its own
+  job with fixed allocations, a durable ledger with restart-safe cost retries (one initial job
+  and at most 20 retries), deadline and cancellation handling, `status`/`stop`/`reap`, an
+  orchestration report and structured logs. A cost monitor on nine exclusive cores with an
+  idle probe and checks A and B per window, and an evidence validator that `decide` applies
+  to every monitored bundle, also after `clean`.
 
 ## Implementation validation (2026-09-24)
 
@@ -66,6 +72,51 @@ not measurements of an evolved Qiskit revision.
 Local evidence is under `results/validation/summary.json`, `results/smoke-validation/`,
 and `results/compatibility-validation/`. These checks establish implementation behavior;
 they do not validate a runner or demonstrate a candidate improvement.
+
+## LSF orchestration validation (2026-09-26)
+
+- All 323 automated tests pass on macOS (Python 3.11), including 89 under `lsf/tests/`:
+  allocation translation, the monitor on synthetic counters and topology (SMT, missing
+  metrics, mismatched masks, brief contamination, each check alone, timeout restarts, the
+  final window), evidence admission (forged and missing records, missing and incompatible
+  extensions, replay after cleanup), and the manager against a fake scheduler running every
+  job in-process through the real entry point (fixed allocations, gate-closed jobs, exactly
+  20 retries, a manager killed mid-submission, a killed last attempt, lost submission
+  answers, rejected submissions, queue deadlines, failed stages, duplicate managers,
+  signals, requeue and `reap`, log levels and correlation fields).
+- In a Linux container (5 vCPUs of a laptop VM), the real `LinuxProbe` path ran through
+  `run_worker`: the worker was placed on its core before `exec`, windows were contiguous and
+  the final one was taken between exit and reap. The worker CPU summed over windows (4.49 s)
+  matched the reaped worker's usage (4.494 s), with 0.01–0.03 s of foreign time per clean
+  window. A CPU burner pinned to the worker core failed checks A and B in the first window
+  (1.13 s of foreign CPU in 2.04 s), and the aborted worker was reaped. The 105 LSF and
+  worker-hook tests also pass there.
+- On that VM, an unloaded vCPU showed about 6 involuntary switches per second, above check
+  B's 4 per second: a shared laptop vCPU is not a quiet exclusive core, and it shows why the
+  thresholds must be calibrated on the cluster tier.
+
+Nothing has been submitted to LSF: the orchestration is validated against a fake scheduler
+only, and the monitor's thresholds are uncalibrated.
+
+## Monitored cost on LSF
+
+Before relying on cost verdicts from the cluster, on the selected hardware tier and CPU
+layout:
+
+1. Run quiet A/A sessions and record every window's foreign fraction and involuntary rate, to
+   set the thresholds, the window length and the false-rejection rate. Include `DEBUG`
+   logging in the overhead measurement.
+2. Inject controlled contention only inside allocations you own: load on the worker core, on
+   its SMT sibling, and on other cores of the allocation stressing shared cache and memory
+   bandwidth. Checks A and B must catch the first two; the third is outside what they detect.
+3. Run end-to-end A/A and known-slowdown sessions through `lsf/submit.py`: clean runs keep
+   their expected outcomes, contaminated runs are resubmitted, a genuine regression survives
+   the policy rerun, exhaustion never produces a `PASS`, and no job remains after the manager
+   exits (`lsf.control status`).
+4. Settle the site values: the verified hardware selector, the queues, memory and run limits,
+   and the manager's deadline.
+
+A calibrated threshold or window is a new monitor contract version ([versioning](versioning.md#the-monitor-contract)).
 
 ## Validation on a new runner
 
@@ -96,6 +147,8 @@ find out whether a `PASS` on a given runner can be trusted.
 - The runner validation above and manual evidence inspection have not been performed by this
   implementation task. A `PASS` is reachable, but no runner has been checked against known
   outcomes.
+- The LSF orchestration has not run on a cluster, and the monitoring thresholds are IOCR's
+  uncalibrated starting points ([monitored cost on LSF](#monitored-cost-on-lsf)).
 - The adapter intentionally refuses unknown operations and unsupported expression/control-flow
   forms. It does not silently decompose high-level inputs to make a revision compatible.
   Angle-bound targets use an explicit, checked Qiskit state adapter because 2.5.2 has no

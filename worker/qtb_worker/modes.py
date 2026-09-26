@@ -17,6 +17,7 @@ from qtb_worker.adapter import (
     import_target,
     preset,
 )
+from qtb_worker.measurement import measured
 
 
 def verify_provenance(build):
@@ -131,9 +132,10 @@ def run_seed(job, seed, outdir, inputs):
     if mode in {"timing_e2e", "timing_reuse", "preset_build", "memory"}:
         pm = preset(case, target, seed) if mode in {"timing_reuse", "memory"} else None
         if mode == "memory":
-            setup = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            pm.run(circuit)
-            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            with measured():
+                setup = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                pm.run(circuit)
+                peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             scale = 1 if sys.platform == "darwin" else 1024
             return {"setup_peak_rss_bytes": int(setup * scale), "peak_rss_bytes": int(peak * scale)}
 
@@ -147,12 +149,16 @@ def run_seed(job, seed, outdir, inputs):
         for _ in range(job.get("warmups", 1)):
             call()
         samples, elapsed = [], 0
-        while len(samples) < job.get("minimum_calls", 3) or elapsed < job.get("minimum_ns", 10**9):
-            start = time.perf_counter_ns()
-            call()
-            duration = time.perf_counter_ns() - start
-            samples.append(duration)
-            elapsed += duration
+        with measured():
+            while (
+                len(samples) < job.get("minimum_calls", 3)
+                or elapsed < job.get("minimum_ns", 10**9)
+            ):
+                start = time.perf_counter_ns()
+                call()
+                duration = time.perf_counter_ns() - start
+                samples.append(duration)
+                elapsed += duration
         return {"samples_ns": samples}
     if mode == "api_checks":
         from qiskit import QuantumCircuit

@@ -29,7 +29,8 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qtb", "worker/qtb_worker", "verifier/qtb_verifier"]
+packages = ["src/qtb", "worker/qtb_worker", "verifier/qtb_verifier", "lsf"]
+exclude = ["lsf/tests", "lsf/README.md"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "profiles" = "qtb/data/profiles"
@@ -37,7 +38,7 @@ packages = ["src/qtb", "worker/qtb_worker", "verifier/qtb_verifier"]
 "envs" = "qtb/data/envs"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "lsf/tests"]
 addopts = ["-ra", "--strict-markers"]
 
 [tool.ruff]
@@ -48,3 +49,11 @@ extend-exclude = ["design"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Run as a file, it fixes sys.path before importing anything (lsf/logging.py).
+"lsf/submit.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["qtb", "qtb_worker", "qtb_verifier"]
+known-local-folder = ["lsf"]

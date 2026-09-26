@@ -3,7 +3,7 @@
 [Documentation index](README.md)
 
 This is a dated history of design findings. For current commands, use the
-[workflow guides](README.md#workflow).
+[workflow guides](workflow/README.md).
 
 Reviewed against the working tree on 2026-09-24. Each numbered finding was checked separately. The table distinguishes code fixes from findings that were stale or still require controlled-runner evidence. Rows 7, 8, 11, 12, 20, 24, 26 and 29 were updated on 2026-09-25, when `compare` was split into separate stages with a baseline store and qualification was removed.
 

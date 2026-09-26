@@ -15,7 +15,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked --all-extras
-      - run: uv run ruff check src worker verifier tests
+      - run: uv run ruff check src worker verifier tests lsf
       - run: uv run pytest -q
       - run: uv run python tools/probes/confirm_panel.py
       - run: uv build --wheel

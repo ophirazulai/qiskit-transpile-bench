@@ -24,7 +24,7 @@ uv sync --all-extras
 - Each source folder must be a Qiskit checkout with `rust-toolchain.toml` and `Cargo.lock`.
   Git submodules must be materialized as files
 - For several hosts: the shared-filesystem and interpreter requirements
-  [in the cluster guide](cluster.md#running-stages-on-several-hosts)
+  [in the LSF session guide](cluster.md#shared-paths-and-compatible-hosts)
 
 ## Four kinds of environment
 
@@ -75,5 +75,5 @@ installed package.
 - [compile](workflow/compile.md): snapshots, release wheels, build identities, provenance,
   build timings and troubleshooting.
 - [Baseline store](store.md): shared baseline builds and results, keys and maintenance.
-- [Cluster execution](cluster.md): shared paths, interpreter availability, LSF and runner locks.
+- [LSF session guide](cluster.md): starting and watching sessions, shared paths, interpreter availability.
 - [clean](workflow/clean.md): disk use and cleanup scope.

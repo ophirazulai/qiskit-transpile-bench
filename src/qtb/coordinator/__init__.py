@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
+from qtb import execution
 from qtb.canonical import (
     atomic_bytes,
     circuit_lines,
@@ -215,12 +216,13 @@ def stage_coverage(run, cases, observations, clifford, prefix):
 def worker_count():
     """Concurrency for correctness jobs; never used for timing or memory measurement.
 
-    On LSF, the slots granted to the job (``LSB_DJOB_NUMPROC``); otherwise one less than the
-    CPU count, at most 12.
+    The workers the installed execution context grants (``qtb.execution``: a scheduler
+    entry point translates its allocation); otherwise one less than the CPU count, at
+    most 12.
     """
-    granted = os.environ.get("LSB_DJOB_NUMPROC", "")
-    if granted.isdigit() and int(granted) > 0:
-        return int(granted)
+    granted = execution.current().workers
+    if granted:
+        return granted
     return max(1, min(12, (os.cpu_count() or 2) - 1))
 
 
@@ -265,10 +267,15 @@ class Comparison:
             "evolved": str(Path(evolved).resolve()),
         }
         store = str(Path(store).resolve())
+        # Requirements the execution context sets for a new session, such as the evidence
+        # extension that cost bundles must satisfy (qtb.extensions).
+        requirements = dict(execution.current().session)
         if (self.directory / "run.json").exists():
             self.run = read_json(self.directory / "run.json")
             wanted = {"sources": sources, "store": store, "profile": profile}
             found = {key: self.run.get(key) for key in wanted}
+            found.update({key: self.run.get(key) for key in requirements})
+            wanted.update(requirements)
             if found != wanted:
                 changed = ", ".join(k for k in wanted if wanted[k] != found[k])
                 raise Usage(
@@ -279,7 +286,7 @@ class Comparison:
         else:
             self.directory.mkdir(parents=True, exist_ok=True)
             self.run = {
-                "format": "qtb-run/2",
+                "format": "qtb-run/3",
                 "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
                 + "-"
                 + uuid.uuid4().hex[:8],
@@ -293,6 +300,7 @@ class Comparison:
                 "status": "created",
                 "coverage_gaps": self.manifest.get("coverage_gaps", []),
                 "sources": sources,
+                **requirements,
             }
             write_json(self.directory / "manifest.json", self.manifest)
             write_json(self.directory / "policy.json", self.policy)
@@ -440,6 +448,11 @@ class Comparison:
                 )
             pending.append("evolved")
 
+        # Both builds share the granted slots; without a grant each uses the whole host.
+        tasks_count = 1 + bool(pending)
+        granted = execution.current().workers
+        jobs = max(1, granted // tasks_count) if granted else None
+
         def evolved_build(level):
             with step(self, "evolved Qiskit build", level):
                 self.progress(
@@ -454,11 +467,12 @@ class Comparison:
                     toolchain,
                     label="evolved",
                     progress=self.progress,
+                    jobs=jobs,
                 )
 
         def baseline_build(level):
             return self.baseline_build(
-                snapshots["baseline"], identities["baseline"], found[0], toolchain, level
+                snapshots["baseline"], identities["baseline"], found[0], toolchain, level, jobs
             )
 
         # Both revisions are prepared concurrently: the final LTO step of one build leaves
@@ -481,7 +495,7 @@ class Comparison:
         self.run["status"] = "built"
         self.save()
 
-    def baseline_build(self, snapshot_info, identity, wheel, toolchain, level=0):
+    def baseline_build(self, snapshot_info, identity, wheel, toolchain, level=0, jobs=None):
         """The baseline build from the store, building it there on a miss.
 
         The key covers the build identity and the harness wheel installed in the venv. A
@@ -515,6 +529,7 @@ class Comparison:
                             wheel_cache=self.store.wheels,
                             label="baseline",
                             progress=self.progress,
+                            jobs=jobs,
                         )
                     atomic_bytes(entry / "READY", (datetime.now(UTC).isoformat() + "\n").encode())
         if reused:

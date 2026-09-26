@@ -45,17 +45,26 @@ def coordinator_identity():
     )
 
 
+# Every package of the installed and archived harness. ``lsf`` holds the cost monitor, its
+# evidence validator and the allocation adapter, which decide whether a measurement counts.
+HARNESS_PACKAGES = ("qtb", "qtb_worker", "qtb_verifier", "lsf")
+
+
 def implementation_identity():
     """Code/schema identity excludes profile data so unchanged cases stay reusable."""
     entries = {}
-    for package in ("qtb", "qtb_worker", "qtb_verifier"):
+    for package in HARNESS_PACKAGES:
         spec = importlib.util.find_spec(package)
         if spec is None or not spec.submodule_search_locations:
             raise HarnessError(f"Missing installed harness package: {package}")
         root = Path(next(iter(spec.submodule_search_locations)))
         for path in sorted(root.rglob("*")):
             relative = path.relative_to(root)
-            if "data" not in relative.parts and path.suffix in {".py", ".json"}:
+            if (
+                "data" not in relative.parts
+                and "tests" not in relative.parts
+                and path.suffix in {".py", ".json"}
+            ):
                 entries[f"{package}/{relative}"] = file_hash(path)
     return digest(entries)
 

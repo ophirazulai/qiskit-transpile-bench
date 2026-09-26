@@ -19,6 +19,8 @@ PASS (iterations-profile): /…/sessions/idea1
 Cleaned /…/sessions/idea1: freed 1.42 GiB in 38 items.
 ```
 
+`decide` prints the cleanup that follows it on stderr.
+
 ## What to open first
 
 | You want | Open |
@@ -53,12 +55,14 @@ can contain failed checks and still exit 0; `decide` reports their effect on the
 | `changed-tests.json` | `unit-tests` | Test files and Rust sources that the evolved tree changed |
 | `upstream-baseline/`, `upstream-evolved/` | `unit-tests` | Upstream pytest records (`tests.jsonl.gz`, failure text kept only for failed tests), `tests.log`, `rust.log` and the copied `test/` tree. With a stored baseline, the baseline records and logs stay in the store entry and `upstream-baseline/` is not written |
 | `upstream-evolved-own/`, `upstream-evolved-own.json` | `unit-tests` | Report-only run of the candidate's own Python tests |
-| `cost/<panel>/screen.json`, `normal.json`, `rerun.json` | `cost` | Raw two-arm timing or memory bundles, one per regime reached; sessions in subdirectories. A timing session holds one `timing_batch` job per round and arm |
+| `cost/<panel>/screen.json`, `normal.json`, `rerun.json` | `cost` | Raw two-arm timing or memory bundles, one per regime reached ([below](#cost-bundles)); sessions in subdirectories. A timing session holds one `timing_batch` job per round and arm. A session interrupted by interference keeps its jobs and a `contaminated.json` |
+| `cost/monitor/<job key>/` | `cost` (monitored) | `preflight.json` (allocation, layout, machine, idle probe) and `contamination*.json` (the failing window and its worker record) of one cost invocation |
 | `jobs/<uuid>/` | Worker | `job.json`, `worker.log`, `out/results.jsonl`, output circuits `out/output-<seed>.ops.jsonl.gz` |
 | `oracle-jobs/<uuid>/` | Verifier | `job.json`, `result.json` for each distinct verifier job not already cached |
 | `oracle-jobs/batch-<uuid>/` | Verifier | `batch.json` (the jobs one verifier process ran, in order) and its `verifier.log` |
 | `stages/<stage>/state.json` | That stage | The stage's state ([below](#stagesstagestatejson)) |
 | `stages/<stage>/evidence.json` | That stage | The constraint records the stage produced |
+| `stages/<stage>/invocations.jsonl` | That stage | One line per invocation that ended: status, exit, invocation identity, host, times, reason |
 | `stages/<stage>/progress.log` | That stage | Timestamped progress (wall clock and elapsed time), a start/end line with the duration of every step, one line per quality batch, and the stage's table of step durations. A retried stage appends to it |
 | `stages/<stage>/lock`, `stages/decide.lock` | That stage, `decide` | Locks: one invocation of a stage, or of `decide`, at a time |
 | `lifecycle.lock` | Stages, `decide`, `clean` | Held shared by stages and `decide`, exclusively by `clean` |
@@ -70,13 +74,14 @@ can contain failed checks and still exit 0; `decide` reports their effect on the
 
 Every shared file has one writer. `decide` reads a stage's evidence only when its state is
 `complete`; from a `failed` stage it reads only the `harness/error/<stage>` record, and from a
-`running`, `skipped` or unstarted stage nothing. A record ID that appears in two stage
+`running`, `noisy`, `skipped` or unstarted stage nothing. A record ID that appears in two stage
 evidence files is a harness error. `decide` adds `*1/stage-coverage` itself once `quality` and
 `correctness` are both complete.
 
 ## `run.json`
 
-Format `qtb-run/2`. Written only by `compile`; `decide` never rewrites it.
+Format `qtb-run/3` (`qtb-run/2` sessions are still read). Written only by `compile`;
+`decide` never rewrites it.
 
 | Field | Content |
 | --- | --- |
@@ -93,30 +98,54 @@ Format `qtb-run/2`. Written only by `compile`; `decide` never rewrites it.
 | `status` | `created`, then `built` once both builds and the verifier are ready |
 | `coverage_gaps` | The profile's declared coverage gaps |
 | `verifier_python` | The verifier interpreter |
+| `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/1`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
 
 ## `stages/<stage>/state.json`
 
-Format `qtb-stage/1`. `status: complete` is written last and is the stage's commit marker.
+Format `qtb-stage/2` (`qtb-stage/1` states are still read; other formats are refused).
+`status: complete` is written last and is the stage's commit marker.
 
 | Field | Content |
 | --- | --- |
 | `stage` | `compile`, `quality`, `correctness`, `unit-tests` or `cost` |
-| `status` | `running`, `complete`, `skipped` or `failed`. A killed job leaves `running` |
+| `status` | `running`, `complete`, `skipped`, `failed` or `noisy`. A killed job leaves `running`; detected interference leaves `noisy` |
 | `started_at`, `finished_at`, `seconds` | When the latest attempt ran and how long it took |
 | `attempts` | How many times the stage has started |
 | `machine` | Machine identity of the host that ran it |
-| `scheduler` | `LSB_JOBID`, `LSB_QUEUE`, `LSB_HOSTS`, `LSB_MCPU_HOSTS` and `LSB_DJOB_NUMPROC`, when set |
+| `scheduler` | The scheduler record of the execution context, empty for a direct run. On LSF: `name`, `job_id`, `job_name`, `queue`, `hosts` (host → slots) and `slots` |
+| `invocation` | The identity the execution context supplied for this invocation, or `null`. On LSF: `run_id`, `job_key`, `attempt`, `job_id`, `job_name`; the manager checks it before trusting an outcome |
 | `inputs` | Coordinator, implementation, harness, manifest and policy hashes, and the build ID of each revision |
 | `workers` | Worker processes used |
 | `steps` | Every step's name, depth, duration and status |
 | `reused` | What came from the store: `baseline_build` (key), `baseline_quality` (list of keys), `baseline_correctness` (key) or `baseline_unit_tests` (key) |
 | `gate`, `gate_reason` | `quality` only: `improved`, `aa` or `closed`, and why |
-| `reason` | Why the stage was `skipped` or `failed` |
+| `reason` | Why the stage was `skipped`, `failed` or `noisy` |
+| `contamination` | `noisy` only: the monitor's evidence (the failing window's counters, the reasons, the diagnostics path) |
 | `cost_due` | `cost` only: why cost was measured (`improved` or `aa`) |
 
 A `complete` or `skipped` stage never runs again in its session: it prints `already complete`
-(or `already skipped`) and exits 0. A `running` or `failed` stage resumes when run again. To
-measure a finished stage again, start a new session.
+(or `already skipped`) and exits 0. A `running`, `failed` or `noisy` stage resumes when run
+again. To measure a finished stage again, start a new session.
+
+## Cost bundles
+
+`cost/<panel>/<regime>.json` holds one complete regime: both arms, measured interleaved, on
+one host, in one invocation.
+
+| Field | Content |
+| --- | --- |
+| `session_id`, `arms` | The regime's session and each arm's `arm_id`, `build_id` and raw `samples` |
+| `run_id`, `regime`, `estimator`, `case_hashes`, `interleaving_seed`, `timing_protocol`, `thresholds_id` | What was measured and how |
+| `machine`, `measured_at`, `complete` | The cost host and time |
+| `measurement_mode` | `machine` (runner lock and load wait) or `cores` (monitored exclusive cores). Bundles of older harnesses have none and are labelled unmonitored |
+| `worker_jobs` | Every worker job of the regime with its arm, in order |
+| `monitor` | `cores` only (format `qtb-lsf-monitor-evidence/1`): `contract`, `identity`, `attempt`, `host`, `machine`, `allocation` (slots, hosts, the resource request and where it came from, the exclusive-core and single-host requests, the selectors, LSF's CPU lists), `layout` (the mask, the monitor, worker and reserved cores), `tier`, `thresholds`, `thread_scope`, `idle_probe`, and `workers`: one record per actual worker process with `job`, `pid`, `launched`, `exited`, `returncode`, `cpus`, `rusage` and its `windows` (start, end, seconds, busy, worker CPU, foreign CPU, involuntary switches, heartbeat entries, and the A/B results) |
+
+The saved A/B results are for reading only: admission recomputes both checks from the
+counters ([cost](workflow/cost.md#measurement-modes)). Each worker record also contains
+`measurements`, the acknowledged start/end intervals of its measured entries. Each window's
+`measurement` is the corresponding zero-based interval index, or null outside measured work.
+Admission requires the expected number of complete intervals, covered by contiguous windows.
 
 ## Replayed baseline rows (`cached_from`)
 
@@ -293,3 +322,17 @@ is the SHA-256 of its canonical uncompressed bytes, so gzip timestamps do not ma
 
 A layout is `{input_num_qubits, output_num_qubits, initial_index_layout, final_index_layout,
 routing_permutation}`, or `null` when Qiskit attached none (identity).
+
+## LSF orchestration records
+
+An LSF session keeps its orchestration records in `<results-root>.lsf/`, next to the session
+and outside its cleanup. Everything is written by `lsf/`, never by the harness.
+
+| Path | Format | Content |
+| --- | --- | --- |
+| `launch.json` | `qtb-lsf-launch/1` | The launcher's effective configuration: run ID, paths, profile, resources per job, the cost selector and hardware tier, the log level, the Python, the measurement identity |
+| `ledger.json` | `qtb-lsf-ledger/1` | The durable ledger: every job with its key, name and nonce, status (`reserved`, `submitted`, `ambiguous`, `unreconciled`, `rejected`, `terminal`), job ID, submissions, scheduler state, outcome and whether it consumed retry budget; cost exhaustion or stop; `decide` and cleanup results; one record per manager invocation |
+| `outcomes/<job key>.json` | `qtb-lsf-outcome/1` | What a stage job reports: exit status, message, termination signal, the committed stage state (status, invocation, reason, contamination), host, times and its log files |
+| `report.md`, `report.json` | `qtb-lsf-report/1` | The orchestration report: jobs, cost attempts with their monitoring summaries and evidence paths, the retry budget, why the pipeline stopped, verdict and cleanup |
+| `orchestration.lock` | — | Held by the running manager (and by `lsf.control reap`) |
+| `logs/<run>/` | — | `launcher.*`, `manager-<n>.*` per manager invocation, `jobs/job-<key>.*` per job, LSF `*.out` files, and `diagnostics/` for large scheduler responses. `*.log` is readable, `*.events.jsonl` has one JSON event per line ([LSF session guide](cluster.md#10-detailed-logs)) |

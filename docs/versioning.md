@@ -8,10 +8,49 @@ reject unknown versions. Circuit hashes cover canonical uncompressed JSONL, incl
 typed payloads, parameter trees, register order, and phase. Target hashes preserve
 instruction insertion order. Gzip timestamps do not affect canonical identity.
 
-Session files are tagged as well: `run.json` is `qtb-run/2` (it records the store and is
-written only by `compile`), each `stages/<stage>/state.json` is `qtb-stage/1`, and
-`clean.json` is `qtb-clean/1`. Their fields are listed in [output-format.md](output-format.md).
-A change to these fields requires a new tag.
+Session files are tagged as well: `run.json` is `qtb-run/3` (it records the store and, for
+monitored sessions, the required cost evidence, and is written only by `compile`), each
+`stages/<stage>/state.json` is `qtb-stage/2`, and `clean.json` is `qtb-clean/1`. Their fields
+are listed in [output-format.md](output-format.md). A change to these fields requires a new
+tag.
+
+- `qtb-stage/2` adds the `noisy` status, the `invocation` field and `contamination`. A
+  `qtb-stage/1` reader does not know `noisy` and could take such a stage for something it
+  can finish or clean, so the tag changed. Current readers accept both and refuse any other.
+- `qtb-run/3` adds `cost_evidence`. `qtb-run/2` sessions are still read and decided; their
+  cost bundles are machine-mode or unlabelled, and the report labels them as unmonitored.
+  They are never promoted to monitored evidence, and an active session is never migrated.
+
+## The monitor contract
+
+Monitored cost evidence follows contract `qtb-lsf-monitor/1`, frozen in
+`lsf/cost_monitor.py`: the checks (A, foreign CPU on the worker core; B, involuntary
+preemption of the worker), their thresholds (5 % of physical-core time with a 0.03 s floor;
+4 switches per second with a floor of 2), the 2-second window, the 2-second idle probe, the
+nine-core allocation and the CPU layout (monitor on the first core, worker on the second).
+The bundle evidence is tagged `qtb-lsf-monitor-evidence/1`.
+Its worker records include acknowledged measured intervals for every entry. Windows split
+at their boundaries, excluding setup and warmup from measured-window denominators. Evidence
+without those intervals is inadmissible.
+
+- A session records the contract, the thresholds, the layout, the approved hardware tier and
+  the identity of the measurement code (`lsf/context.py`, `lsf/cost_monitor.py`,
+  `lsf/cost_evidence.py`) in `run.json:cost_evidence` when it is created. Removing fields
+  from a bundle cannot opt out: a bundle without admissible evidence is `unresolved`.
+- Any change to a threshold, the window, the checks, the layout or the allocation is a new
+  contract version, even when it comes from calibration. The profile's cost thresholds
+  (`policy.json:cost_thresholds`) are separate and keep their own rule: changing them is a
+  new profile version.
+- The whole `lsf` package (not its tests) is part of the harness identity and the archived
+  harness wheel. Changing it, the monitor or the allocation adapter included, makes later
+  stages of an existing session refuse to run; start a new session. Queue, memory and run
+  limits are site settings, not part of the harness.
+- `decide` accepts only an evidence extension that implements the session's contract. A
+  missing or incompatible extension refuses the evidence rather than accepting it unchecked.
+
+The LSF orchestration records carry their own tags: `qtb-lsf-launch/1`, `qtb-lsf-ledger/1`,
+`qtb-lsf-outcome/1`, `qtb-lsf-report/1` and `qtb-lsf-context/1`. Readers reject unknown
+ledger formats.
 
 A fixture, semantic reference, role, seed block, canary constant, weight, constraint,
 or threshold change requires a new profile version.
@@ -34,7 +73,8 @@ build flags enter build identity; a stored baseline build is also keyed by the h
 Only baseline wheels are kept, in the store; the evolved tree is compiled once per session.
 Worker protocol, coordinator/harness code, serial environment, machine, and measurement
 policy scope quality evidence. Fresh cost sessions always collect independent arms;
-only complete bundles from the same session can be resumed.
+only complete bundles from the same session can be resumed, and in a monitored session only
+bundles whose monitoring evidence is admissible.
 
 The CI reference is Qiskit 2.5.2 on Python 3.11–3.13. The semantic verifier is independently
 pinned to 2.5.2. Source workers use explicit adapters and reject unsupported operations or

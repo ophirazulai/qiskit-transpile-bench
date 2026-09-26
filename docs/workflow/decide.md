@@ -2,8 +2,9 @@
 
 [Documentation index](../README.md) · [← cost](cost.md) · [clean →](clean.md)
 
-Merge committed evidence, compute the verdict and write the report. This command can run
-repeatedly and does not compile anything.
+Merge committed evidence, compute the verdict and write the report, then clean the
+session's bulk unless a safety check refuses. This command can run repeatedly and does not
+compile anything. On LSF the manager runs it inside its own job.
 
 ## Run this step
 
@@ -15,6 +16,15 @@ uv run qiskit-transpile-bench decide --results-root "$S"
 session. Missing required stages produce `INCONCLUSIVE`; a stage crash gives `ERROR`. This
 command also works after `clean`. See [session rules](../sessions.md) for prerequisites,
 retries and stage exit codes.
+
+## Cleanup afterwards
+
+Once the verdict is written, [clean](clean.md) follows by default, whatever the verdict. It
+is skipped, with the reason on stderr, while a stage is unfinished (`running`, `noisy`, or
+required and not started) or when the session is already clean; `clean`'s own checks still
+apply. The exit status is always the verdict's: a cleanup that was skipped or failed is
+reported separately. On LSF the manager submits the cleanup as its own job, once, and records
+the outcome in the orchestration report.
 
 ## Reading the verdict
 
@@ -42,7 +52,7 @@ coverage](../metrics.md#7-change-scope-and-stage-coverage).
 `decide` holds `lifecycle.lock` shared and `stages/decide.lock` exclusive while it takes one
 snapshot of every stage's state, the state files' hashes and their committed evidence. A
 `complete` stage contributes all its evidence, a `failed` stage only
-`harness/error/<stage>`, and a `running`, `skipped` or unstarted stage nothing. A record ID
+`harness/error/<stage>`, and a `running`, `noisy`, `skipped` or unstarted stage nothing. A record ID
 that appears in two stage evidence files is a harness error.
 
 It uses the session's archived `manifest.json` and `policy.json`, checked against the hashes
@@ -52,9 +62,24 @@ in `run.json`, so it works with a newer harness and after `clean`. It never rewr
 Required stages are conditional: `compile` and `quality` always, `correctness` when the gate
 is `improved` or `aa`, `cost` when the gate is open and correctness found no failure, and
 `unit-tests` once it has started (`running`, `failed` or `complete`), in which case
-`*1/upstream` joins the required IDs. A required stage that has not finished forces
-`INCONCLUSIVE` (unless the verdict is `ERROR`). Cost evidence is replayed from the raw
-bundles only when `cost` is complete.
+`*1/upstream` joins the required IDs. A required stage that has not finished, including a
+`noisy` one, forces `INCONCLUSIVE` (unless the verdict is `ERROR`). Cost evidence is replayed
+from the raw bundles only when `cost` is complete.
+
+## Cost evidence
+
+Replayed bundles must satisfy the session's `run.json:cost_evidence` requirement, when it has
+one: the extension named there (`lsf.cost_evidence` for an LSF session) re-checks the
+monitoring evidence of every bundle from its raw counters, ignoring saved labels. A bundle
+that fails, or an extension that is missing or implements another contract, makes that
+panel `unresolved`, never `passed`. The report says which evidence the verdict rests on:
+"monitored (`qtb-lsf-monitor/1`)", "machine mode", or unmonitored results of an older
+harness, which are labelled as such and never treated as monitored.
+
+When `cost` is `noisy` (its last invocation detected interference, for example after the LSF
+retry budget was exhausted), the report notes "no clean measurement": that is missing
+evidence, not an observed cost regression. An independently proven violation or a harness
+error still sets the verdict.
 
 `decision.json` records each stage's status, whether it was required, its host, duration,
 attempts and what it reused, plus the stage-state hashes that `clean` checks. `report.md`
@@ -77,5 +102,6 @@ When the gate is closed, the report explains which expensive checks were not run
 required stage is unfinished, run it and decide again. For an iterations `PASS`, start a new
 session with `--profile confirm-profile` before claiming a broad gain.
 
-After reviewing the final report, run [clean](clean.md) to reclaim this session's bulk. If
-optional unit tests start after the decision, decide again before cleaning.
+`decide` reclaims the session's bulk itself when the session is finished; the results,
+evidence and cost bundles are kept, so deciding again works. If cleanup was skipped because
+a stage was unfinished, finish the stage and decide again.

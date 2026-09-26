@@ -5,6 +5,7 @@ from statistics import fmean, median
 
 from qtb.canonical import digest
 from qtb.errors import HarnessError, Incomplete
+from qtb.extensions import check_cost_evidence
 
 # Fallback (screen, normal, rerun) counts when a policy names none.
 COUNTS = {"timing": (0, 10, 20), "companion": (0, 3, 6), "memory": (0, 5, 10)}
@@ -105,7 +106,12 @@ def _breached(estimate, baseline, weights, threshold):
     }
 
 
-def validate_bundle(bundle, policy, estimator, weights, run_id=None):
+def validate_bundle(bundle, policy, estimator, weights, run_id=None, requirement=None):
+    """Check one regime bundle before it is reused or judged; ``Incomplete`` when it cannot be.
+
+    ``requirement`` is the session's ``cost_evidence``: when present, the bundle must also
+    satisfy that extension's evidence check (see ``qtb.extensions``).
+    """
     if not bundle.get("complete") or set(bundle.get("arms", {})) != set(MEASURED_ARMS):
         raise Incomplete("Cost panel must contain baseline and evolved arms")
     if run_id is not None and bundle["run_id"] != run_id:
@@ -127,9 +133,12 @@ def validate_bundle(bundle, policy, estimator, weights, run_id=None):
             arrays = samples.values() if estimator == "companion" else [samples]
             if any(len(x) != count for x in arrays):
                 raise Incomplete("Wrong cost sample count")
+    check_cost_evidence(
+        requirement, bundle, estimator=estimator, count=count, cases=sorted(weights)
+    )
 
 
-def cost_guard(bundle, policy, estimator, weights, run_id=None):
+def cost_guard(bundle, policy, estimator, weights, run_id=None, requirement=None):
     """Judge one bundle at its regime against the policy's fixed thresholds.
 
     ``screen``: ``passed`` when the candidate sits inside ``screen_fraction`` of
@@ -138,7 +147,7 @@ def cost_guard(bundle, policy, estimator, weights, run_id=None):
     session. ``normal``: a breach sets ``needs_rerun``. ``rerun``: decides
     ``failed`` or ``passed_on_rerun``.
     """
-    validate_bundle(bundle, policy, estimator, weights, run_id)
+    validate_bundle(bundle, policy, estimator, weights, run_id, requirement)
     regime = bundle["regime"]
     threshold = thresholds(policy, estimator, regime)
     estimates = {

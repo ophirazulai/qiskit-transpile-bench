@@ -1,5 +1,7 @@
 import pytest
 
+from stage_world import make_world
+
 
 @pytest.fixture(autouse=True)
 def private_runner_lock(monkeypatch, tmp_path):
@@ -10,6 +12,12 @@ def private_runner_lock(monkeypatch, tmp_path):
     lock = tmp_path / "qtb-runner-test.lock"
     monkeypatch.setattr(costs, "runner_lock", lambda: lock)
     monkeypatch.setattr(coordinator, "runner_lock", lambda: lock)
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    """Sources, a store and fake stage work (``stage_world``)."""
+    return make_world(tmp_path, monkeypatch)
 
 
 def write_session(root, manifest, policy, rows, evidence, states, run=None):

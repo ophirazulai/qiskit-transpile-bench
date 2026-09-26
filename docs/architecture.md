@@ -115,7 +115,7 @@ process.
 
 ## Workflow and ownership
 
-The [workflow guide](README.md#workflow) documents each command. Common locks, prerequisites
+The [workflow guide](workflow/README.md) documents each command. Common locks, prerequisites
 and retry rules live in [sessions](sessions.md). Each stage owns its state, evidence and log;
 `compile` alone writes `run.json`, and `decide` alone writes the combined evidence and verdict.
 [Output formats](output-format.md#directory-contents) lists file ownership.
@@ -124,14 +124,31 @@ The baseline build and baseline results are shared through the [store](store.md)
 about the evolved tree and the trusted verifier stays in the session. Cost samples always
 come from fresh two-arm measurements in that session.
 
-Each stage can run on its own compatible host. Only cost requires a quiet, exclusive host;
-see [cluster execution](cluster.md).
+Each stage can run on its own compatible host. Only cost requires quiet, exclusive cores;
+see the [LSF session guide](cluster.md).
+
+## Scheduler boundary
+
+The harness executes one stage invocation and reports its outcome; it never schedules work or
+retries it. A scheduler entry point installs an execution context (`qtb.execution`) around a
+stage: the worker count, the scheduler record, the invocation identity, requirements that a
+new session records (`cost_evidence`), a cost measurement extension, and how `decide`'s
+cleanup is carried out. The harness offers worker lifecycle hooks (`process.run_worker`), a
+`Contaminated` outcome that ends a stage `noisy` (exit 42), and a required evidence
+extension (`qtb.extensions`) that bundle validation calls.
+
+Everything specific to LSF is under `lsf/`: the allocation adapter, the cost monitor and its
+evidence validator (measurement-facing, and pinned with the harness), and the launcher,
+manager, job entry point, ledger, retry policy, scheduler commands, reports and logs
+([`lsf/README.md`](../lsf/README.md)).
 
 ## Source layout
 
 ```text
 src/qtb/
   cli.py              command line: the seven commands and their exit codes
+  execution.py        the execution context a scheduler entry point installs
+  extensions.py       required evidence extensions named by a session
   canonical/          hashing and file formats
   config/             profile loading, identities, JSON Schemas (schemas/*.json)
   envbuild/           snapshot, build, provenance
@@ -157,7 +174,9 @@ verifier/qtb_verifier/ small_exact.py (C1, C7), layout_semantics.py (C2, C1-lite
 profiles/             iterations-profile/, confirm-profile/
 fixtures/             circuits/, references/, targets/, correctness-suite.json, PROVENANCE.md
 envs/                 lock files for revision, test and verifier environments
-tools/                curation, probes, timeout freezing, schema generation, lsf/ examples
+lsf/                  LSF launcher, manager, stage job entry point, cost monitor and
+                      evidence validator, ledger and retries, scheduler commands; tests/
+tools/                curation, probes, timeout freezing, schema generation
 tests/                harness unit tests
 design/               design plan and probes
 ```

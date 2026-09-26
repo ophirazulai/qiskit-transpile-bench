@@ -230,7 +230,8 @@ def baseline_toolchain(snapshot_info):
     return tomllib.loads(path.read_text())["toolchain"]["channel"]
 
 
-def build_environment(toolchain, cargo_home=None):
+def build_environment(toolchain, cargo_home=None, jobs=None):
+    """``jobs`` bounds the compiler's parallelism; it does not enter the build identity."""
     env = sanitized_environment(
         {
             "QISKIT_BUILD_PROFILE": "release",
@@ -243,6 +244,9 @@ def build_environment(toolchain, cargo_home=None):
     )
     if cargo_home is not None:
         env["CARGO_HOME"] = str(cargo_home)
+    if jobs:
+        env["CARGO_BUILD_JOBS"] = str(jobs)
+        env["CMAKE_BUILD_PARALLEL_LEVEL"] = str(jobs)
     return env
 
 
@@ -287,6 +291,7 @@ def build_into(
     wheel_cache=None,
     label="baseline",
     progress=None,
+    jobs=None,
 ):
     """Build ``snapshot_info`` at its final path ``destination``.
 
@@ -303,7 +308,7 @@ def build_into(
     cargo = destination / "cargo"
     cargo.mkdir()
     (cargo / "config.toml").write_text("[net]\nretry = 2\n")
-    env = build_environment(toolchain, cargo)
+    env = build_environment(toolchain, cargo, jobs)
     run_logged([sys.executable, "-m", "venv", envdir], destination, env, log)
     python = envdir / "bin/python"
     run_logged(
