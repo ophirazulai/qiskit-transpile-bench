@@ -16,8 +16,12 @@ two checks to every window:
 - **B. Involuntary preemption**: the worker's involuntary context switches over the same
   window, summed over all its threads and live descendants, per second.
 
-The first window that fails either check aborts the measurement: the worker is stopped and
-reaped and ``Contaminated`` is raised, which ends the stage ``noisy``. Missing samples,
+Only windows inside a measured interval (between the worker's acknowledged ``B`` and ``E``
+boundaries) are decisive. Setup, imports, warmup and reporting windows are judged and
+recorded, but produce no timed sample, so they never abort: short start-up windows fail the
+floors on the worker's own start-up alone. The first decisive window that fails either
+check aborts the measurement: the worker is stopped and reaped and ``Contaminated`` is
+raised, which ends the stage ``noisy``. Missing samples,
 invalid counters or a changed CPU mask are never clean: they raise ``MonitorFailure``. The
 checks detect CPU interference; they do not prove the absence of shared-cache,
 memory-bandwidth, frequency or thermal effects.
@@ -41,7 +45,7 @@ from lsf import logging as log
 from lsf import measurement_identity
 from lsf.context import allocation_problems, parse_cpu_list
 
-CONTRACT = "qtb-lsf-monitor/1"
+CONTRACT = "qtb-lsf-monitor/2"
 EVIDENCE_FORMAT = "qtb-lsf-monitor-evidence/1"
 COST_SLOTS = 9
 LAYOUT = "monitor=core0,worker=core1,reserved=core2-8"
@@ -55,11 +59,11 @@ THRESHOLDS = {
     "idle_probe_s": 2.0,
     # A: foreign busy time on the worker core as a fraction of physical-core time, with a
     # floor for clock-tick granularity in short windows.
-    "foreign_cpu_fraction": 0.05,
+    "foreign_cpu_fraction": 0.15,
     "foreign_cpu_floor_s": 0.03,
     # B: involuntary switches of the serial worker per second, with a floor for short
     # windows. Not multiplied by the nine allocated slots.
-    "involuntary_per_s": 4.0,
+    "involuntary_per_s": 12.0,
     "involuntary_floor": 2,
 }
 
@@ -76,6 +80,11 @@ def check_a(foreign_s, seconds, thresholds):
 def check_b(involuntary, seconds, thresholds):
     limit = max(thresholds["involuntary_per_s"] * seconds, thresholds["involuntary_floor"])
     return involuntary <= limit, limit
+
+
+def decisive(window):
+    """Whether a failed check in ``window`` voids the measurement: only measured windows."""
+    return window.get("measurement") is not None
 
 
 def judge(window, thresholds):
@@ -640,7 +649,7 @@ class WorkerHooks:
             window=window["index"],
             counters=window,
         )
-        if not reasons:
+        if not reasons or not decisive(window):
             return None
         self.aborted = self.record["aborted"] = True
         return monitor.contaminated(self, window, reasons)

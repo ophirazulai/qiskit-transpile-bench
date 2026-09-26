@@ -120,11 +120,18 @@ def test_monitored_cost_is_admitted_replayed_and_survives_cleanup(monitored):
     assert outcome["exit_code"] == 0 and outcome["state"]["status"] == "complete"
     code, decision = decide(world.session, progress=QUIET)
     assert decision["status"] == "PASS"
-    assert any("monitored (qtb-lsf-monitor/1)" in note for note in decision["notes"])
+    assert any("monitored (qtb-lsf-monitor/2)" in note for note in decision["notes"])
     assert clean(world.session, progress=QUIET) == 0
     # Replay after cleanup: the bundles and their monitoring evidence were kept.
     assert decide(world.session, progress=QUIET)[1]["status"] == "PASS"
     assert (world.session / "cost/monitor/cost-a01/preflight.json").exists()
+
+
+def measured(bundle):
+    """The first measured window of the bundle's first worker."""
+    return next(
+        w for w in bundle["monitor"]["workers"][0]["windows"] if w["measurement"] is not None
+    )
 
 
 def forge(session, change):
@@ -140,9 +147,8 @@ def forge(session, change):
         (lambda b: b.pop("monitor"), "no monitoring evidence"),
         (lambda b: b.update(measurement_mode="machine"), "machine mode"),
         (
-            lambda b: b["monitor"]["workers"][0]["windows"][0].update(
-                busy_s=b["monitor"]["workers"][0]["windows"][0]["busy_s"] + 1.5,
-                foreign_s=b["monitor"]["workers"][0]["windows"][0]["foreign_s"] + 1.5,
+            lambda b: measured(b).update(
+                busy_s=measured(b)["busy_s"] + 1.5, foreign_s=measured(b)["foreign_s"] + 1.5
             ),
             "A: foreign CPU",
         ),
@@ -349,3 +355,16 @@ def test_validator_problems_for_crafted_evidence():
     assert "1 worker jobs, not the 2" in found[0]
     with pytest.raises(Incomplete, match="Inadmissible"):
         validate(broken, required, estimator="timing", count=1, cases=["c"])
+    # Noise in setup (before the measured interval) is recorded but not decisive...
+    noisy = dict(window, measurement=None, final=False, busy_s=1.0, worker_cpu_s=0.5)
+    noisy.update(foreign_s=0.5, involuntary=50, a="fail", b="fail")
+    timed = dict(window, index=1, start=1.0, end=2.0)
+    setup = copy.deepcopy(bundle)
+    for worker in setup["monitor"]["workers"]:
+        worker.update(exited=2.0, windows=[noisy, timed], measurements=[{"start": 1.0, "end": 2.0}])
+    assert problems(setup, required, estimator="timing", count=1, cases=["c"]) == []
+    # ...while the same noise inside it is.
+    for worker in setup["monitor"]["workers"]:
+        worker["windows"][1] = dict(noisy, index=1, start=1.0, end=2.0, measurement=0, final=True)
+    found = " ".join(problems(setup, required, estimator="timing", count=1, cases=["c"]))
+    assert "A: foreign CPU" in found and "B:" in found

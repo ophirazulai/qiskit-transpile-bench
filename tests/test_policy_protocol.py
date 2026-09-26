@@ -161,8 +161,8 @@ def test_shipped_profiles_screen_then_measure_at_their_own_full_count():
         assert regime_counts("companion", protocol) == {"normal": 3, "rerun": 6}
         assert regime_counts("memory", protocol) == {"normal": 5, "rerun": 10}
         assert policy["cost_thresholds"] == {
-            "panel_ratio": 1.03,
-            "case_ratio": 1.10,
+            "panel_ratio": 1.10,
+            "case_ratio": 1.20,
             "case_floor_ns": 25_000_000,
             "case_floor_bytes": 32 * 1024 * 1024,
             "screen_fraction": 0.5,

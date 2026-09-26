@@ -9,7 +9,8 @@ its lifetime and never runs a stage body itself::
 Each stage is its own job with its configured allocation; a stage whose gate is closed runs
 and records ``skipped`` itself. A stage already ``complete`` or ``skipped`` is not
 submitted again, and a stage job that already ended is never resubmitted: only a cost job
-that ended ``noisy`` leads to another cost job, within the ledger's budget (``lsf.retry``).
+that ended ``noisy`` leads to another cost job, within the ledger's budget (``lsf.retry``),
+which avoids the hosts that were noisy before.
 
 A stage outcome is trusted only when the scheduler's terminal state, the job's outcome
 record and the committed stage state agree on the invocation. Pending time counts toward
@@ -393,7 +394,7 @@ class Manager:
 
     # Submitting
 
-    def spec(self, stage, key, attempt):
+    def spec(self, stage, key, attempt, exclude_hosts=()):
         resources = self.launch["resources"][stage]
         command = [
             self.launch["python"],
@@ -420,13 +421,23 @@ class Manager:
             wall=resources["wall"],
             output=str(self.log_dir / "jobs" / f"{key}.%J.out"),
             selector=self.launch["cost_selector"] if stage == "cost" else {},
+            exclude_hosts=tuple(exclude_hosts),
         )
 
     def submit(self, stage, attempt=None):
         """Reserve, then submit; returns the job key, or ``None`` when nothing was accepted."""
         nonce = uuid.uuid4().hex[:8]
         key = f"{stage}-a{attempt:02d}-{nonce}" if attempt else f"{stage}-{nonce}"
-        spec = self.spec(stage, key, attempt)
+        exclude_hosts = retry.excluded_hosts(self.ledger) if stage == "cost" else []
+        if exclude_hosts:
+            log.event(
+                "retry.exclude_hosts",
+                f"{stage} attempt {attempt} avoids {', '.join(exclude_hosts)}",
+                stage=stage,
+                attempt=attempt,
+                hosts=exclude_hosts,
+            )
+        spec = self.spec(stage, key, attempt, exclude_hosts)
         needed = wall_seconds(spec.wall)
         if self.remaining() < needed:
             self.stop_reason = (
@@ -712,6 +723,7 @@ class Manager:
         scheduler = {
             "state": getattr(status, "state", None),
             "exit_code": getattr(status, "exit_code", None),
+            "host": getattr(status, "host", None),
         }
         self.ledger.update(
             key,

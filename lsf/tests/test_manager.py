@@ -15,7 +15,7 @@ from qtb.errors import Contaminated
 from lsf import control, lsf_directory, retry, submit
 from lsf.manager import Manager
 from lsf.retry import Ledger
-from lsf.tests.conftest import FakeScheduler
+from lsf.tests.conftest import HOST, FakeScheduler
 
 
 class Clock:
@@ -178,6 +178,51 @@ def test_noisy_cost_is_retried_in_new_jobs_until_it_is_clean(world, tmp_path, mo
     report = read_json(lsf_dir / "report.json")
     assert report["cost"]["used"] == 3 and report["cost"]["remaining"] == 18
     assert "A: foreign CPU" in report["cost"]["attempts"][0]["reason"]
+
+
+def cost_requests(backend):
+    argvs = [spec.argv() for spec in backend.submitted if spec.kind == "cost"]
+    return [argv[argv.index("-R") + 1] for argv in argvs]
+
+
+def test_a_host_noisy_twice_is_excluded_from_later_cost_attempts(world, tmp_path, monkeypatch):
+    noisy(monkeypatch, failures=2)
+    backend = FakeScheduler()
+    session, lsf_dir = launch(world, tmp_path, backend)
+    assert manager(lsf_dir, backend).run() == 0
+    first, second, third = cost_requests(backend)
+    assert "hname" not in first and "hname" not in second
+    assert f"hname != {HOST}" in third
+    ledger = Ledger.load(lsf_dir / "ledger.json")
+    assert retry.excluded_hosts(ledger) == [HOST]
+    assert ledger.cost_attempts()[0]["scheduler"]["host"] == HOST
+
+
+def test_excluded_hosts_count_idle_probe_failures_at_once_and_keep_the_latest():
+    def attempt(n, host, phase=None, kind="noisy"):
+        contamination = {"phase": phase} if phase else {"window": {"index": 1}}
+        return {
+            "stage": "cost",
+            "key": f"cost-a{n:02d}",
+            "attempt": n,
+            "status": "terminal",
+            "scheduler": {"host": host},
+            "outcome": {"kind": kind, "contamination": contamination},
+        }
+
+    entries = [
+        attempt(1, "idle", phase="idle probe"),
+        attempt(2, "once"),
+        attempt(3, "twice"),
+        attempt(4, "twice"),
+        attempt(5, "failed", kind="failed"),
+        attempt(6, "failed", kind="failed"),
+    ]
+    fake = type("L", (), {"cost_attempts": lambda self: entries})()
+    assert retry.excluded_hosts(fake) == ["idle", "twice"]
+    entries[:] = [attempt(n, f"h{n}", phase="idle probe") for n in range(1, 12)]
+    assert retry.excluded_hosts(fake) == [f"h{n}" for n in range(4, 12)]
+    assert len(retry.excluded_hosts(fake)) == retry.MAX_EXCLUDED_HOSTS
 
 
 def test_exactly_twenty_retries_then_exhaustion_without_a_false_pass(world, tmp_path, monkeypatch):
@@ -462,6 +507,7 @@ def test_an_idle_probe_landing_is_retried_and_reported(world, tmp_path):
     assert second["outcome"] == "complete" and second["cpu"] == "Synthetic Xeon"
     assert second["preflight"].endswith("preflight.json")
     assert "idle probe" in (lsf_dir / "report.md").read_text()
+    assert f"hname != {HOST}" in cost_requests(backend)[1]  # excluded after one idle failure
 
 
 def test_a_requeued_manager_reads_the_ledger_only_under_the_lock(world, tmp_path):

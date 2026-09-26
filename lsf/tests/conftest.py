@@ -169,16 +169,36 @@ class SyntheticProbe:
             self.t += dt
 
 
-def drive(hooks, probe, pid, seconds, entries=3, tick=0.1, measured_entries=None):
-    """Run one synthetic worker process through its lifecycle hooks, like ``run_worker``."""
+def _poll(hooks, probe, pid, seconds, tick, done):
+    """Advance ``seconds`` of worker time, polling ``progress`` every ``tick``."""
+    elapsed = 0.0
+    while elapsed < seconds - 1e-9:
+        step = min(tick, seconds - elapsed)
+        probe.advance(step)
+        elapsed += step
+        problem = hooks.progress(pid, done)
+        if problem is not None:
+            return problem
+    return None
+
+
+def drive(hooks, probe, pid, seconds, entries=3, tick=0.1, measured_entries=None, setup=0.0):
+    """Run one synthetic worker process through its lifecycle hooks, like ``run_worker``.
+
+    With ``measured_entries`` the worker spends ``setup`` seconds (imports, warmup) before
+    its first measured interval, then ``seconds`` split over its ``B``/``E`` intervals.
+    """
     hooks.spawn_options()
     probe.start(pid)
     hooks.launched(pid)
     if measured_entries is not None:
-        for _ in range(measured_entries):
-            problem = hooks.measurement(pid, b"B")
+        problem = _poll(hooks, probe, pid, setup, tick, 0)
+        for done in range(measured_entries):
             if problem is None:
-                probe.advance(seconds / measured_entries)
+                problem = hooks.measurement(pid, b"B")
+            if problem is None:
+                problem = _poll(hooks, probe, pid, seconds / measured_entries, tick, done)
+            if problem is None:
                 problem = hooks.measurement(pid, b"E")
             if problem is not None:
                 probe.stop()

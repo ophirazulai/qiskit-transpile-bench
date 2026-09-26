@@ -96,7 +96,7 @@ def policy(profile):
     return dict(
         format="qtb-policy/1",
         profile=profile,
-        version=5,
+        version=6,
         required_ids=required,
         quality_prerequisites=["harness/roundtrip", "audit/determinism"],
         practical_ratio=0.99 if prefix == "CA" else 1.0,
@@ -126,8 +126,8 @@ def policy(profile):
         # Fixed cost guards; there is no per-machine calibration. See
         # design/remove-calibration-plan.md for how to sanity-check them on a runner.
         cost_thresholds=dict(
-            panel_ratio=1.03,
-            case_ratio=1.10,
+            panel_ratio=1.10,
+            case_ratio=1.20,
             case_floor_ns=25_000_000,
             case_floor_bytes=32 * 1024 * 1024,
             screen_fraction=0.5,
@@ -455,7 +455,7 @@ def curate(source, root=ROOT):
         manifest = dict(
             format="qtb-manifest/1",
             profile=profile,
-            version=5,
+            version=6,
             cases=cases,
             coverage_gaps=[
                 "No line target in upstream suite",

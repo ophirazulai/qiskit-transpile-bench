@@ -3,7 +3,7 @@
 A session can require that every cost bundle carry evidence checked by an extension, for
 example the LSF monitor's cleanliness evidence. ``run.json:cost_evidence`` names it::
 
-    {"contract": "qtb-lsf-monitor/1", "validator": "lsf.cost_evidence:validate", ...}
+    {"contract": "qtb-lsf-monitor/2", "validator": "lsf.cost_evidence:validate", ...}
 
 The requirement is recorded when the session is created, so removing fields from a bundle
 cannot opt out of it. An extension that cannot be imported, or that implements another

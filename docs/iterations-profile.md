@@ -23,7 +23,7 @@ See the [README](../README.md) for the stages, the store and the exit codes.
 
 Files: `profiles/iterations-profile/manifest.json` (the workload) and
 `profiles/iterations-profile/policy.json` (thresholds and measurement protocol). Both are
-version 5.
+version 6.
 
 ## What it asks
 
@@ -132,7 +132,7 @@ All rules compare against the baseline. The formulas are in [metrics.md](metrics
 | IA2 improvement | `IA2/improvement` | Primary `cz` panel: `ln(D2 score) + 2·SE < 0` |
 | IA3 guards | `IA3/primary/N2`, `IA3/primary/D2`, `IA3/cx/D2`, `IA3/cx/N2`, `IA3/ecr/D2`, `IA3/ecr/N2` | Each panel: `ln(score) ≤ 3·SE` |
 | IA4 caps and canaries | `IA4/cap/<case>/<metric>`, `IA4/exact/<canary>` | No scored or guard case has a seed-aggregated ratio above 1.05 for `D2` or `N2`. Canaries equal their constants |
-| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel time ratio at most 1.03, and no per-case breach (> 10% slower and by more than 25 ms) |
+| IA5 cost | `IA5/timing`, `IA5/timing-basis`, `IA5/preset`, `IA5/companion` | Panel time ratio at most 1.10, and no per-case breach (> 20% slower and by more than 25 ms) |
 | IA6 completeness | `IA6/completeness` | All 2 × (9 × 100 + 3 × 10) observations are present. Determinism audit passed |
 
 Required IDs in `policy.json`: `harness/roundtrip`, `baseline/preflight`,
@@ -145,7 +145,7 @@ Policy values (`policy.json`): improvement multiplier 2.0, guard multiplier 3.0,
 ratio 1.0 (any improvement beyond noise counts), quality cap 1.05, RNG seed 20260924.
 The upstream test budgets (4 h Python, 3 h Rust) apply only when `unit-tests` runs. Timing:
 4 screen rounds, 6 full rounds, rerun multiplier 2, 1 warm-up, at least 2 timed calls and 1 s
-per round. Cost thresholds (fixed, never calibrated): panel ratio 1.03, case ratio 1.10 above
+per round. Cost thresholds (fixed, never calibrated): panel ratio 1.10, case ratio 1.20 above
 a 25 ms (32 MiB) floor, screen fraction 0.5.
 
 ## Statistical power

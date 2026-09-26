@@ -3,7 +3,7 @@
 [Documentation index](README.md)
 
 The implementation originated from `design/transpilation-benchmark-impl-plan.md`; the
-README describes the current CLI. Both profiles are version 5. There is no qualification
+README describes the current CLI. Both profiles are version 6. There is no qualification
 step: a session can end `PASS` when every required record passes. Validating the harness on a
 new runner is a practice, described below, not a required record. A successful `compile` is
 not a validation. Numerical examples and synthetic acceptance-path tests are harness tests,

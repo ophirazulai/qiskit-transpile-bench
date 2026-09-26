@@ -56,6 +56,6 @@ submitted. `LinuxProbe` parsing is tested against a fake `/proc` tree; the real 
 `launch.json` (`qtb-lsf-launch/1`), `ledger.json` (`qtb-lsf-ledger/1`), `outcomes/*.json`
 (`qtb-lsf-outcome/1`), `report.json` (`qtb-lsf-report/1`), the execution context
 (`qtb-lsf-context/1`), and monitoring evidence in cost bundles
-(`qtb-lsf-monitor-evidence/1`, contract `qtb-lsf-monitor/1`). See
+(`qtb-lsf-monitor-evidence/1`, contract `qtb-lsf-monitor/2`). See
 [output formats](../docs/output-format.md#lsf-orchestration-records) and
 [versioning](../docs/versioning.md).

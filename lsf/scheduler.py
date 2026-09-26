@@ -11,8 +11,9 @@ queue delays, signal deaths and stage exit codes are never confused:
   proof that a job has gone. ``NOTFOUND`` means ``bjobs`` no longer lists it.
 
 Allocations are fixed: 16 slots for every job except cost, which has 9 exclusive physical
-cores on one quiet host of the approved hardware tier. Memory requests are in GB, as the
-site's ``LSF_UNIT_FOR_LIMITS`` is.
+cores on one quiet host of the approved hardware tier; a cost retry may also exclude hosts
+that were noisy for earlier attempts (``lsf.retry.excluded_hosts``). Memory requests are in
+GB, as the site's ``LSF_UNIT_FOR_LIMITS`` is.
 """
 
 import getpass
@@ -34,6 +35,7 @@ FIELDS = "jobid stat exit_code exec_host pend_reason job_name user"
 SUBMITTED = re.compile(r"Job <(\d+)> is submitted")
 WALL = re.compile(r"^(\d+)(?::([0-5]?\d))?$")
 LARGE = 4000
+HOST_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class QueryFailed(Exception):
@@ -54,7 +56,7 @@ def wall_seconds(wall):
     return int(match.group(1)) * 3600 + int(match.group(2)) * 60
 
 
-def resource_request(kind, mem_gb, selector=None):
+def resource_request(kind, mem_gb, selector=None, exclude_hosts=()):
     """The ``-R`` string: one host, memory, and for cost the quiet exclusive-core request."""
     parts = []
     if kind == "cost":
@@ -65,6 +67,10 @@ def resource_request(kind, mem_gb, selector=None):
             terms.append(f"model == {selector['model']}")
         if selector.get("ncpus") is not None:
             terms.append(f"ncpus == {selector['ncpus']}")
+        for host in exclude_hosts:
+            if not HOST_NAME.match(host):
+                raise ValueError(f"Invalid host name {host!r} to exclude")
+            terms.append(f"hname != {host}")
         if terms:
             parts.append(f"select[{' && '.join(terms)}]")
     parts.append("span[hosts=1]")
@@ -86,12 +92,14 @@ class JobSpec:
     output: str
     selector: dict = field(default_factory=dict)
     rerunnable: bool = False
+    exclude_hosts: tuple = ()
 
     def argv(self):
         argv = ["bsub", "-J", self.name, "-n", str(slots(self.kind))]
         if self.queue:
             argv += ["-q", self.queue]
-        argv += ["-W", self.wall, "-R", resource_request(self.kind, self.mem_gb, self.selector)]
+        request = resource_request(self.kind, self.mem_gb, self.selector, self.exclude_hosts)
+        argv += ["-W", self.wall, "-R", request]
         argv += ["-o", self.output]
         if self.rerunnable:
             argv.append("-r")

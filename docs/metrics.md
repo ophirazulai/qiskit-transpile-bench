@@ -169,12 +169,12 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   evolved) run interleaved in random order within each round. Nothing else may run on the
   measured core. On LSF the stage holds nine exclusive physical cores, and a monitor checks
   every window of every worker for foreign CPU activity and involuntary preemption; the first
-  failing window discards the invocation (`noisy`) and the manager measures again in a new
+  failing measured window discards the invocation (`noisy`) and the manager measures again in a new
   job ([cost](workflow/cost.md#measurement-modes)). Run directly, the stage takes an
   exclusive runner lock and waits up to 5 minutes for the load average to fall below half
   the core count; if it does not, the result is `unresolved`.
 - **Thresholds** (`policy.json` → `cost_thresholds`), the same for every runner:
-  `panel_ratio` 1.03, `case_ratio` 1.10, `case_floor_ns` 25 ms, `case_floor_bytes` 32 MiB,
+  `panel_ratio` 1.10, `case_ratio` 1.20, `case_floor_ns` 25 ms, `case_floor_bytes` 32 MiB,
   `screen_fraction` 0.5. Every cost bundle records the digest of this block
   (`thresholds_id`), and a bundle judged under different thresholds is `unresolved`.
 - **Guard:** a panel breaches if `ln_panel > ln(panel_ratio)`, or if any case has

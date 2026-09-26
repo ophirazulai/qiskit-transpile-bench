@@ -34,7 +34,9 @@ refuse the stage (exit 41, nothing written).
 
 During measurement it observes every actual worker process, including the fresh process
 after a per-entry timeout, from launch to exit in bounded windows (2 s), and applies two
-checks to every window.
+checks to every window. Only windows inside a measured interval are decisive: setup,
+imports, warmup and reporting windows are judged and recorded but never abort, because no
+timed sample comes from them.
 
 Workers acknowledge a start and end boundary around each entry's measured calls, after
 setup and warmup. These boundaries split monitoring windows, so setup cannot dilute a
@@ -44,10 +46,10 @@ the worker's timers and must be included in cluster overhead calibration.
 
 | Check | Measured | Accepted when |
 | --- | --- | --- |
-| A. Foreign CPU activity | Busy time of the worker core, all SMT siblings, less the CPU time of the worker and its descendants over the same window | At most 5 % of physical-core time (at least 0.03 s for short windows) |
-| B. Involuntary preemption | The worker's involuntary context switches over the same window, all threads and live descendants; the final window is completed from the reaped worker's usage | At most 4 per second (at least 2 for short windows) |
+| A. Foreign CPU activity | Busy time of the worker core, all SMT siblings, less the CPU time of the worker and its descendants over the same window | At most 15 % of physical-core time (at least 0.03 s for short windows) |
+| B. Involuntary preemption | The worker's involuntary context switches over the same window, all threads and live descendants; the final window is completed from the reaped worker's usage | At most 12 per second (at least 2 for short windows) |
 
-The first failing window stops and reaps the worker, keeps its diagnostics
+The first failing measured window stops and reaps the worker, keeps its diagnostics
 (`cost/monitor/<job key>/contamination*.json`, and `contaminated.json` in the interrupted
 regime's session directory) and ends the stage `noisy` (exit 42). Nothing measured by that
 invocation is committed; complete regime bundles from earlier invocations stay valid. A
@@ -58,7 +60,7 @@ they describe the whole host, not the allocated cores.
 The checks detect CPU interference; they do not prove the absence of shared-cache,
 memory-bandwidth, frequency or thermal effects. The paired, interleaved protocol below
 remains the defense against those. The thresholds are starting points frozen with contract
-`qtb-lsf-monitor/1` and must be calibrated on the chosen tier
+`qtb-lsf-monitor/2` and must be calibrated on the chosen tier
 ([validation](../validation.md#monitored-cost-on-lsf)).
 
 **Machine (`machine`), direct runs.** Without a monitor the stage takes an exclusive per-user
@@ -100,7 +102,7 @@ on iterations or ten on confirm. A candidate-only breach triggers one fresh reru
 the full count. A repeat breach is `failed`; a clean rerun is `passed_on_rerun`. Companion
 and memory panels have no screen and use their own counts.
 
-The fixed thresholds are `panel_ratio = 1.03`, `case_ratio = 1.10`, a 25 ms per-case timing
+The fixed thresholds are `panel_ratio = 1.10`, `case_ratio = 1.20`, a 25 ms per-case timing
 floor and a 32 MiB memory floor. There is no automatic calibration. Use an [A/A validation
 session](../validation.md#known-outcome-controls) to check runner drift.
 

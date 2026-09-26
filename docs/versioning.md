@@ -23,10 +23,10 @@ tag.
 
 ## The monitor contract
 
-Monitored cost evidence follows contract `qtb-lsf-monitor/1`, frozen in
+Monitored cost evidence follows contract `qtb-lsf-monitor/2`, frozen in
 `lsf/cost_monitor.py`: the checks (A, foreign CPU on the worker core; B, involuntary
-preemption of the worker), their thresholds (5 % of physical-core time with a 0.03 s floor;
-4 switches per second with a floor of 2), the 2-second window, the 2-second idle probe, the
+preemption of the worker), their thresholds (15 % of physical-core time with a 0.03 s floor;
+12 switches per second with a floor of 2), which windows are decisive (only measured ones), the 2-second window, the 2-second idle probe, the
 nine-core allocation and the CPU layout (monitor on the first core, worker on the second).
 The bundle evidence is tagged `qtb-lsf-monitor-evidence/1`.
 Its worker records include acknowledged measured intervals for every entry. Windows split
@@ -58,7 +58,11 @@ Do not edit a frozen profile to accept a candidate. Recuration is an explicit ma
 operation using `tools/curate/curate.py`; comparisons consume only frozen artifacts.
 The original RevLib/HWB claims do not transfer to their declared generated replacements.
 
-Both profiles are at version 5. Version 5 removed qualification: the `harness/qualification`
+Both profiles are at version 6. Version 6 relaxed the cost thresholds: `panel_ratio` 1.03 →
+1.10 and `case_ratio` 1.10 → 1.20 (floors and `screen_fraction` unchanged). Cost bundles
+record `thresholds_id`, so bundles measured under version 5 thresholds are not reused.
+
+Version 5 removed qualification: the `harness/qualification`
 required ID and the policy's `qualification` object are gone, and the manifests no longer
 carry a `status`. It also removed `CA1/upstream` from the confirm policy's `required_ids`;
 `decide` now requires `*1/upstream` on either profile once the optional `unit-tests` stage has

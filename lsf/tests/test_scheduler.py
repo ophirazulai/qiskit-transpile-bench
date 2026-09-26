@@ -30,6 +30,21 @@ def test_resource_requests_are_fixed_per_kind():
     assert argv[-1] == "python" and "-r" not in argv
 
 
+def test_cost_retries_can_exclude_noisy_hosts():
+    selector = {"ncpus": 56, "max_r1m": 10}
+    assert resource_request("cost", 16, selector, ["cccxc436", "h-2.lab"]) == (
+        "select[r1m < 10 && ncpus == 56 && hname != cccxc436 && hname != h-2.lab] "
+        "span[hosts=1] affinity[core(1,exclusive=(core,alljobs))] rusage[mem=16]"
+    )
+    spec = JobSpec(
+        "cost", "n", ["python"], None, 16, "8:00", "/o/%J.out", selector, exclude_hosts=("a1",)
+    )
+    assert "hname != a1" in spec.argv()[spec.argv().index("-R") + 1]
+    for bad in ("", "a b", "a]", "a&&b", "-x"):
+        with pytest.raises(ValueError):
+            resource_request("cost", 16, selector, [bad])
+
+
 def test_wall_limits_are_lsf_run_limits():
     assert wall_seconds("12:00") == 12 * 3600
     assert wall_seconds("1:30") == 5400

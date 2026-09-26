@@ -18,6 +18,11 @@ looked up and cancelled if it appears, and, having no outcome, it allows no retr
 that only recorded ``skipped`` consumes nothing. Only a job that ended ``noisy`` (positive
 contamination evidence) allows another attempt; a killed, failed or lost one does not. The
 ledger is rewritten atomically, and only under the session's orchestration lock.
+
+A retry avoids hosts that were noisy before (``excluded_hosts``): a host whose idle probe saw
+foreign activity at once, one whose measurement was contaminated after a clean idle probe
+after ``HOST_NOISY_LIMIT`` such attempts. At most ``MAX_EXCLUDED_HOSTS``, the most recently
+noisy, are excluded, so the tier's pool is never exhausted by exclusions alone.
 """
 
 import getpass
@@ -33,6 +38,9 @@ MAX_COST_RETRIES = 20
 MAX_COST_ATTEMPTS = MAX_COST_RETRIES + 1
 # Consecutive positively rejected submissions of one job before the manager gives up.
 MAX_REJECTIONS = 3
+# Noisy measurements on one host (after a clean idle probe) before retries avoid it.
+HOST_NOISY_LIMIT = 2
+MAX_EXCLUDED_HOSTS = 8
 ACTIVE = {"reserved", "submitted", "ambiguous"}
 CONSUMING = {"reserved", "submitted", "ambiguous", "unreconciled", "terminal"}
 
@@ -167,6 +175,23 @@ def decision(ledger):
         )
     reason = "initial cost job" if last is None else f"attempt {last['attempt']} was noisy"
     return dict(result, allowed=True, reason=reason)
+
+
+def excluded_hosts(ledger):
+    """Hosts the next cost job must avoid, the most recently noisy last."""
+    strikes, excluded = {}, []
+    for entry in ledger.cost_attempts():
+        outcome = entry.get("outcome") or {}
+        host = (entry.get("scheduler") or {}).get("host") or outcome.get("host")
+        if outcome.get("kind") != "noisy" or not host:
+            continue
+        idle = (outcome.get("contamination") or {}).get("phase") == "idle probe"
+        strikes[host] = strikes.get(host, 0) + (HOST_NOISY_LIMIT if idle else 1)
+        if strikes[host] >= HOST_NOISY_LIMIT:
+            if host in excluded:
+                excluded.remove(host)
+            excluded.append(host)
+    return excluded[-MAX_EXCLUDED_HOSTS:]
 
 
 def record_exhaustion(ledger, reason):

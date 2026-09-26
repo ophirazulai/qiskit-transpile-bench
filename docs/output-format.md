@@ -98,7 +98,7 @@ Format `qtb-run/3` (`qtb-run/2` sessions are still read). Written only by `compi
 | `status` | `created`, then `built` once both builds and the verifier are ready |
 | `coverage_gaps` | The profile's declared coverage gaps |
 | `verifier_python` | The verifier interpreter |
-| `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/1`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
+| `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/2`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
 
 ## `stages/<stage>/state.json`
 

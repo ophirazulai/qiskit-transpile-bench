@@ -11,7 +11,8 @@ judge or replay, including ``decide`` run directly or after ``clean``
 - has a clean idle probe;
 - covers every worker job of the bundle, both arms, each actual process from launch to
   exit in contiguous windows ending with a final one, with finite counters;
-- passes checks A and B in every window when they are recomputed from the raw counters.
+- passes checks A and B in every measured window when they are recomputed from the raw
+  counters (setup, warmup and reporting windows are not decisive: ``decisive``).
 
 Saved ``pass`` labels and verdicts are never trusted.
 """
@@ -29,6 +30,7 @@ from lsf.cost_monitor import (
     LAYOUT,
     THRESHOLDS,
     check_a,
+    decisive,
     judge,
 )
 
@@ -210,7 +212,7 @@ def _record_problems(record, thresholds, worker_cpus):
         if window["seconds"] > thresholds["window_s"] * 2 + 1:
             found.append(f"{name} window {window.get('index')}: longer than the bounded window")
             break
-        reasons = judge(window, thresholds)
+        reasons = judge(window, thresholds) if decisive(window) else []
         if reasons:
             found.append(f"{name} window {window['index']}: {'; '.join(reasons)}")
             break

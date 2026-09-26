@@ -209,10 +209,12 @@ Where things are, under `<results-root>.lsf/logs/<run>/`:
   topology, pins itself to the first core and the serial cost worker to the second, and
   probes the worker core while nothing runs. During measurement it checks, in bounded
   windows of every worker process: **A**, foreign CPU time on the worker core (all SMT
-  siblings) and **B**, involuntary preemption of the worker. The first failing window aborts
-  the measurement; the job exits 42 and the stage is `noisy`. Details: [cost](workflow/cost.md#measurement-modes).
+  siblings) and **B**, involuntary preemption of the worker. The first failing measured
+  window aborts the measurement (setup and warmup windows are recorded but never abort); the job exits 42 and the stage is `noisy`. Details: [cost](workflow/cost.md#measurement-modes).
 - **Retries.** After a `noisy` cost job the manager submits a new cost job, which is placed
-  afresh. Complete, clean regime bundles from earlier attempts are reused; the interrupted
+  afresh and avoids the hosts that were noisy before (`hname != ...` in its `select[]`): a
+  host whose idle probe failed at once, one whose measurement failed after two such
+  attempts; at most the 8 most recent are excluded. Complete, clean regime bundles from earlier attempts are reused; the interrupted
   regime is measured again from scratch. The ledger counts attempts: one initial job and at
   most 20 retries. A killed, failed or refused cost job is not retried: only positive
   contamination evidence is. A submission LSF never answered blocks further attempts while
@@ -332,9 +334,9 @@ Each stage can run on a different host. Then:
 
 ## Still to calibrate on your cluster
 
-The monitoring thresholds and window length are frozen with contract `qtb-lsf-monitor/1`
-(foreign CPU below 5 % of physical-core time, at most 4 involuntary switches per second,
-2-second windows); they are IOCR's starting values. Before relying on cost verdicts, run
+The monitoring thresholds and window length are frozen with contract `qtb-lsf-monitor/2`
+(foreign CPU below 15 % of physical-core time, at most 12 involuntary switches per second,
+2-second windows, only measured windows decisive); they are IOCR's starting values. Before relying on cost verdicts, run
 quiet A/A sessions and controlled contention on the chosen tier to establish the false
 rejection rate and the monitoring overhead ([validation](validation.md#monitored-cost-on-lsf)).
 Changing a threshold is a new contract version.

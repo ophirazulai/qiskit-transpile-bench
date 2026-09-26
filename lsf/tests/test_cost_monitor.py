@@ -39,10 +39,10 @@ def comparison(required=None):
 def test_checks_have_floors_for_short_windows_and_scale_with_long_ones():
     t = THRESHOLDS
     assert check_a(0.03, 0.1, t)[0] and not check_a(0.031, 0.1, t)[0]
-    assert check_a(0.1, 2.0, t)[0] and not check_a(0.11, 2.0, t)[0]
+    assert check_a(0.3, 2.0, t)[0] and not check_a(0.31, 2.0, t)[0]
     assert check_b(2, 0.1, t)[0] and not check_b(3, 0.1, t)[0]
-    assert check_b(8, 2.0, t)[0] and not check_b(9, 2.0, t)[0]
-    window = {"seconds": 2.0, "foreign_s": 0.5, "involuntary": 20}
+    assert check_b(24, 2.0, t)[0] and not check_b(25, 2.0, t)[0]
+    window = {"seconds": 2.0, "foreign_s": 0.5, "involuntary": 30}
     reasons = judge(window, t)
     assert [r[:2] for r in reasons] == ["A:", "B:"]
     assert judge(dict(window, foreign_s=0.0), t)[0].startswith("B:")
@@ -150,14 +150,16 @@ def test_clean_workers_are_covered_launch_to_exit_in_bounded_windows(
 
 
 def test_brief_contamination_aborts_on_its_own_window_not_diluted(tmp_path, fast_thresholds):
-    # 0.3 s of a foreign process in a 60 s run: 0.5 % overall, 15 % of one window.
-    probe = SyntheticProbe(foreign=lambda t: 1.0 if 20.0 <= t < 20.3 else 0.0)
+    # 0.8 s of a foreign process in a 60 s run: 1.3 % overall, 40 % of one window.
+    probe = SyntheticProbe(foreign=lambda t: 1.0 if 20.0 <= t < 20.8 else 0.0)
     m = prepared(tmp_path, probe)
-    problem = drive(m.worker_hooks("0-batch-baseline"), probe, 100, seconds=60)
+    hooks = m.worker_hooks("0-batch-baseline")
+    problem = drive(hooks, probe, 100, seconds=60, measured_entries=3)
     assert isinstance(problem, Contaminated)
     window = problem.evidence["window"]
     assert window["a"] == "fail" and window["b"] == "pass"
-    assert window["start"] <= 20.3 and window["end"] >= 20.0
+    assert window["measurement"] is not None
+    assert window["start"] <= 20.8 and window["end"] >= 20.0
     record = m._bundles["session"][0]
     assert record["aborted"] and len(record["windows"]) < 30
     assert (tmp_path / "diagnostics/contamination-1.json").exists()
@@ -166,9 +168,56 @@ def test_brief_contamination_aborts_on_its_own_window_not_diluted(tmp_path, fast
 def test_preemption_alone_fails_check_b(tmp_path, fast_thresholds):
     probe = SyntheticProbe(preemption=lambda t: 50.0 if t > 5 else 0.5)
     m = prepared(tmp_path, probe)
-    problem = drive(m.worker_hooks("0-x-baseline"), probe, 100, seconds=20)
+    problem = drive(m.worker_hooks("0-x-baseline"), probe, 100, seconds=20, measured_entries=4)
     assert problem.evidence["window"]["a"] == "pass"
     assert problem.evidence["window"]["b"] == "fail"
+
+
+def test_noisy_setup_warmup_and_reporting_windows_are_recorded_but_never_abort(
+    tmp_path, fast_thresholds
+):
+    # A foreign process and heavy preemption while the worker imports and warms up (the
+    # first 3 s of its life) and again while it reports; its measured intervals are clean.
+    probe = SyntheticProbe()
+    m = prepared(tmp_path, probe)
+    t0 = probe.t
+    noisy = lambda t: t < t0 + 3.0 or t > t0 + 9.0  # noqa: E731
+    probe.foreign = lambda t: 1.0 if noisy(t) else 0.0
+    probe.preemption = lambda t: 50.0 if noisy(t) else 0.5
+    hooks = m.worker_hooks("0-batch-baseline")
+    hooks.spawn_options()
+    probe.start(100)
+    hooks.launched(100)
+    probe.advance(3.0)
+    assert hooks.progress(100, 0) is None
+    for done in range(3):
+        assert hooks.measurement(100, b"B") is None
+        for _ in range(20):
+            probe.advance(0.1)
+            assert hooks.progress(100, done) is None
+        assert hooks.measurement(100, b"E") is None
+    probe.advance(3.0)  # reporting
+    assert hooks.progress(100, 3) is None
+    probe.advance(0.001)
+    hooks.exited(100)
+    probe.stop()
+    assert hooks.reaped(100, 0) is None
+    record = m.end_bundle("session")["workers"][0]
+    assert not record["aborted"]
+    unmeasured = [w for w in record["windows"] if w["measurement"] is None]
+    measured = [w for w in record["windows"] if w["measurement"] is not None]
+    assert {w["measurement"] for w in measured} == {0, 1, 2}
+    assert all(w["a"] == w["b"] == "pass" for w in measured)
+    assert unmeasured[0]["a"] == unmeasured[0]["b"] == "fail"
+    assert unmeasured[-2]["a"] == unmeasured[-2]["b"] == "fail"  # before the brief final one
+
+
+def test_the_same_noise_inside_a_measured_interval_aborts(tmp_path, fast_thresholds):
+    probe = SyntheticProbe(preemption=lambda t: 50.0)
+    m = prepared(tmp_path, probe)
+    problem = drive(m.worker_hooks("0-x-baseline"), probe, 100, seconds=6, measured_entries=3)
+    assert isinstance(problem, Contaminated)
+    assert problem.evidence["window"]["measurement"] == 0
 
 
 def test_the_final_window_is_completed_from_the_reaped_workers_usage(
@@ -185,9 +234,11 @@ def test_the_final_window_is_completed_from_the_reaped_workers_usage(
     probe.switches += 40
     probe.dead_thread_switches = 40
     probe.stop()
-    problem = hooks.reaped(100, 0)
-    assert isinstance(problem, Contaminated) and "B:" in str(problem)
-    assert problem.evidence["window"]["final"]
+    # The final window falls after the last measured interval: recorded, never decisive.
+    assert hooks.reaped(100, 0) is None
+    final = m.end_bundle("session")["workers"][0]["windows"][-1]
+    assert final["final"] and final["measurement"] is None
+    assert final["involuntary"] >= 40 and final["b"] == "fail"
 
 
 def test_every_process_of_a_timeout_restart_is_monitored(tmp_path, probe, fast_thresholds):
