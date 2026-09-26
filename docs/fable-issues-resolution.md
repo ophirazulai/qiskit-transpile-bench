@@ -1,5 +1,10 @@
 # Resolution of `fable-issues-bugs.md`
 
+[Documentation index](README.md)
+
+This is a dated history of design findings. For current commands, use the
+[workflow guides](README.md#workflow).
+
 Reviewed against the working tree on 2026-09-24. Each numbered finding was checked separately. The table distinguishes code fixes from findings that were stale or still require controlled-runner evidence. Rows 7, 8, 11, 12, 20, 24, 26 and 29 were updated on 2026-09-25, when `compare` was split into separate stages with a baseline store and qualification was removed.
 
 | # | Disposition | Result |
@@ -32,6 +37,6 @@ Reviewed against the working tree on 2026-09-24. Each numbered finding was check
 | 26 | Fixed | Rust builds have a four-hour limit. Each build keeps its crates in its own Cargo home; there is no shared registry. The frozen Qiskit source recognizes the exported build flags. |
 | 27 | Partly stale, partly fixed | There is no `calibrate` CLI command to double-snapshot. Incomplete preflight work is now recorded under the correct quality or cost calibration ID. |
 | 28 | Fixed | A regular installed harness can reconstruct a deterministic wheel from verified installed package files; editable installs still need their source. |
-| 29 | Partially resolved | Added C7 verdict mutation, archived synthetic replay and interrupted cost-panel restart tests. Existing tests cover self-grading and cache bypass. A full independent-build A/A run remains a controlled-runner validation step in `docs/known-outcome-validation.md`. |
+| 29 | Partially resolved | Added C7 verdict mutation, archived synthetic replay and interrupted cost-panel restart tests. Existing tests cover self-grading and cache bypass. A full independent-build A/A run remains a controlled-runner validation step in `docs/validation.md`. |
 
-There is no qualification record any more: a session can end `PASS` when every required record passes. Validation on a controlled runner remains a practice ([implementation-status.md](implementation-status.md#validation-on-a-new-runner)). In particular, finding 5's frozen timeouts and finding 29's full A/A run still need measured evidence.
+There is no qualification record any more: a session can end `PASS` when every required record passes. Validation on a controlled runner remains a practice ([implementation and runner validation](validation.md#validation-on-a-new-runner)). In particular, finding 5's frozen timeouts and finding 29's full A/A run still need measured evidence.

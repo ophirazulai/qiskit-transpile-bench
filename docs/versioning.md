@@ -1,5 +1,7 @@
 # Format, profile, and compatibility rules
 
+[Documentation index](README.md)
+
 Canonical circuit/target artifacts, worker/verifier protocols, manifests, policies,
 observations, constraint records, and decisions carry explicit version tags. Readers
 reject unknown versions. Circuit hashes cover canonical uncompressed JSONL, including

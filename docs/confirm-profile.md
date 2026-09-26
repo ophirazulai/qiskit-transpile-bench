@@ -1,5 +1,7 @@
 # The confirm profile
 
+[Documentation index](README.md)
+
 `confirm-profile` is the **broad check**. Run it once, when a change looks good on the
 [iterations profile](iterations-profile.md), to find out whether the gain holds beyond the
 three circuits you tuned on.
@@ -137,7 +139,7 @@ Required IDs in `policy.json`: `harness/roundtrip`, `baseline/preflight`,
 creates, and the cost panels the change scope requires.
 
 **Upstream tests are optional.** They belong to the `unit-tests` stage, which you may run or
-leave out ([verifier.md](verifier.md#upstream-tests)). The rule is: if you run it, it counts.
+leave out ([verifier.md](workflow/unit-tests.md#what-runs)). The rule is: if you run it, it counts.
 `CA1/upstream` is not in `policy.json`; `decide` adds it to the required set once
 `unit-tests` has started (running, failed or complete). A regression then gives
 `CONSTRAINT_VIOLATION`, an unfinished or unresolved suite `INCONCLUSIVE`, and a failed stage

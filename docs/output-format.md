@@ -1,12 +1,14 @@
 # Output: the session directory, `decision.json` and `report.md`
 
+[Documentation index](README.md)
+
 A session is one directory: the `--results-root` given to `compile` (default `results`). It
 holds one baseline/evolved pair, the evolved build, the verifier, every stage's output and the
 verdict. There is no `runs/` level; to compare another pair, pass another `--results-root`.
 Every later command takes the same `--results-root`.
 
 The baseline build and the stored baseline results live in the store, not in the session
-([below](#the-store), and [environments.md](environments.md)).
+([store layout](store.md#layout)).
 
 Each stage prints its final state, `decide` prints the verdict, and `clean` the space freed:
 
@@ -30,32 +32,9 @@ Cleaned /…/sessions/idea1: freed 1.42 GiB in 38 items.
 
 ## Exit codes
 
-A stage's exit status reports whether the stage ran, not what it found. A correctness mismatch
-or a cost breach is a finding: it goes into the stage's evidence, the stage is `complete`, and
-the exit status is 0. Only `decide` turns findings into a verdict.
-
-Stages (`compile`, `quality`, `correctness`, `unit-tests`, `cost`):
-
-| Code | Meaning |
-| ---: | --- |
-| 0 | The stage is `complete` or `skipped`, now or already |
-| 40 | The stage failed: a harness, build or worker error. Its state is `failed` and its evidence holds `harness/error/<stage>`. Run the stage again to resume it |
-| 41 | A precondition is not met: an upstream stage is missing or unfinished, the directory is not a session, the session is cleaned or its cleanup was interrupted, the harness or profile changed since `compile`, the store or its baseline build is missing, this host cannot run the builds, or the same stage is already running |
-| 64 | Usage error: bad options, no store given, the store does not exist, or the results root holds another session or is not a session |
-
-`decide` exits with the verdict:
-
-| Code | Status | Meaning |
-| ---: | --- | --- |
-| 0 | `PASS` | Improvement shown and every required constraint satisfied |
-| 10 | `NO_IMPROVEMENT` | Valid, complete panel, but the improvement rule was not met; nothing violated |
-| 20 | `CONSTRAINT_VIOLATION` | The candidate failed a correctness check or an established quality/cost guard |
-| 30 | `INCONCLUSIVE` | Something required is missing or unresolved, a required stage has not finished, or the baseline itself failed |
-| 40 | `ERROR` | A stage failed (harness, build or input failure) |
-| 41 | — | The directory is not a session |
-| 64 | — | Command-line usage error |
-
-`clean` exits 0 when the session is clean (also when it already was) and 41 when it refuses.
+[Session rules](sessions.md#exit-codes-of-the-stages) lists stage exit codes.
+[decide](workflow/decide.md#reading-the-verdict) lists verdict exit codes. A completed stage
+can contain failed checks and still exit 0; `decide` reports their effect on the verdict.
 
 ## Directory contents
 
@@ -64,7 +43,7 @@ Stages (`compile`, `quality`, `correctness`, `unit-tests`, `cost`):
 | `run.json` | `compile` | Session inputs, hashes, builds and store ([below](#runjson)). No other command writes it |
 | `manifest.json`, `policy.json` | `compile` | Archived copies of the profile used. Later stages check them against `run.json`; `decide` decides from them |
 | `harness-wheel/`, `harness-build.log` | `compile` | The harness wheel installed in every environment |
-| `builds/baseline/`, `builds/evolved/`, `builds/<revision>.snapshot.json` | `compile` | Source snapshots of both trees and their file manifests ([environments.md](environments.md)) |
+| `builds/baseline/`, `builds/evolved/`, `builds/<revision>.snapshot.json` | `compile` | Source snapshots of both trees and their file manifests ([compile](workflow/compile.md#how-a-revision-is-built)) |
 | `builds/evolved-build/` | `compile` | The evolved build: `source/`, `env/`, `cargo/`, `wheels/`, `build.json`, `build.log`. The baseline build is in the store |
 | `verifier/` | `compile` | Verifier environment |
 | `verifier-cache/` | Any stage | Verifier results, addressed by content. Only `verified` and `mismatch` results are kept; writes are atomic and an entry is re-checked before reuse |
@@ -258,31 +237,12 @@ improvement rule passed. `N2` rose 0.4%, within its 3·SE guard. The verdict is 
 
 ## Deciding again
 
-`decide` can run any time after `compile` created the session, as often as you like, and also
-after `clean`. It decides from the session's archived `manifest.json` and `policy.json`
-(checked against the hashes in `run.json`) and the committed stage evidence; cost records are
-recomputed from the raw bundles in `cost/`. It compiles nothing, so it also works with a
-newer harness, for example after fixing an evaluator or reporting bug; the report then notes
-that a different harness version decided. Each run replaces `evidence.json`, `decision.json`,
-`report.md` and `progress.log`. Copy them first to keep an earlier verdict.
+See [decide](workflow/decide.md#deciding-again) for archived-profile replay, newer harnesses
+and preserving an earlier verdict. The file formats below do not require a live build.
 
 ## `clean.json`
 
-`clean` deletes a finished session's bulk and keeps its results. It refuses (exit 41) while a
-stage is `running`, before any `decide`, or when a stage state changed since the latest
-`decide` (for example, optional unit tests started afterwards: run `decide` again). It never
-touches the store and ignores the verdict.
-
-- **Deleted:** `builds/evolved-build/`, the snapshot copies `builds/baseline/` and
-  `builds/evolved/` (and any `*.failed-*` build directory), `verifier/`, `verifier-cache/`,
-  `oracle-jobs/`, every `jobs/**/scratch`, the copied `upstream-*/test` trees, the
-  session-local `upstream-*/cargo` directories, and verified
-  quality outputs and verified C6 prefix outputs larger than the policy's
-  `output_retention_bytes`. Outputs of failing or unverified checks are kept.
-- **Kept:** `run.json`, `manifest.json`, `policy.json`, `harness-wheel/`, `stages/`,
-  `evidence.json`, `decision.json`, `report.md`, the logs, `observations.jsonl`,
-  `correctness.jsonl`, `clifford.jsonl`, `cost/`, `changed-tests.json`, every `job.json` and
-  `builds/<revision>.snapshot.json`.
+[clean](workflow/clean.md) describes prerequisites, deletions, retained results and recovery.
 
 Format `qtb-clean/1`:
 
@@ -294,32 +254,10 @@ Format `qtb-clean/1`:
 | `planned` | Every path to delete. A directory: `kind: directory`, `files`, `bytes` and `listing_sha256` (a digest of its file list and sizes). A file: `kind: file`, `bytes`, `output_hash`, `observation_id`, `compressed_sha256`, `compressed_bytes`, and for a C6 prefix also `oracle`, `stage` and `job_file` |
 | `freed_bytes` | The total size of the planned items |
 
-`clean.json` is written with `status: cleaning` before anything is deleted. A killed `clean`
-leaves that status; every stage then exits 41 until `clean` is run again, and the rerun
-finishes the recorded list. After `clean`, `decide` still works and every other stage exits 41
-with "Session cleaned". To remove a session entirely, delete its directory.
 
 ## The store
 
-The store holds only baseline data, shared by every session that names it. `compile` takes it
-from `--store` or `QTB_STORE` and records it in `run.json:store`.
-
-```text
-STORE/
-  builds/<key>/          READY, build.json, env/, source/, cargo/, wheels/, build.log
-  builds/<key>.lock      held while that key is being built
-  wheels/<identity>/     baseline Qiskit wheels
-  quality/<key>/         baseline quality observations with their output and job files;
-                         invalidated.json after a failed determinism audit
-  correctness/<key>/     rows.jsonl, evidence.json, provenance.json
-  unit-tests/<key>/      python.json, rust.json, their logs, provenance.json
-```
-
-A build entry without `READY` is an interrupted build and is never read. A correctness or
-unit-test entry is published in one rename; its `provenance.json` records the key, the session
-that computed it and `first_computed`. Nothing about the evolved tree, and no cost sample, is
-written to the store. Keys, sizes and maintenance are described in
-[environments.md](environments.md#the-baseline-store).
+The store is separate from the session directory. See [store layout and keys](store.md#layout).
 
 ## Observations (`observations.jsonl`)
 

@@ -1,5 +1,7 @@
 # How metrics and verdicts are calculated
 
+[Documentation index](README.md)
+
 This page follows one number from a compiled circuit to the final verdict. The code lives in
 `src/qtb/metrics/` (per-circuit metrics), `src/qtb/evaluator/statistics.py` (quality
 estimators), `src/qtb/evaluator/cost.py` (time and memory) and `src/qtb/evaluator/__init__.py`
@@ -186,7 +188,7 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
 
 Cost is its own stage, `cost`, because it needs a quiet, exclusive host and can take hours
 of wall time. It runs after `correctness` and only when the quality gate is open
-(section 8): the candidate improved and every quality check passed, or the run is an A/A run
+([quality gate](workflow/quality.md#the-quality-gate)): the candidate improved and every quality check passed, or the run is an A/A run
 (both builds have the same ID) and every quality check passed. An A/A run never improves, but
 its cost panels are the known-outcome check that timing and memory report no change. When
 correctness found a failure, `cost` records `skipped` without measuring. Cost samples are
@@ -243,41 +245,16 @@ otherwise (missing / unresolved)                  → INCONCLUSIVE          (exi
 A missing record can never produce `PASS`. There is no qualification record: a session ends
 `PASS` when every required record passes. A/A runs and the known-outcome mutations remain the
 way to validate the harness on a new runner
-([known-outcome-validation.md](known-outcome-validation.md)), but they are practices, not
+([known-outcome controls](validation.md#known-outcome-controls)), but they are practices, not
 required records.
 
-### Stages and the quality gate
+### Workflow conditions
 
-The records come from separate stages (`compile`, `quality`, `correctness`, optional
-`unit-tests`, `cost`), and `decide` merges the evidence of the stages that are complete. A
-failed stage contributes only `harness/error/<stage>`, which gives `ERROR`.
-
-At the end of `quality`, the **gate** decides whether the later stages run:
-
-| Gate | When | Then |
-| --- | --- | --- |
-| `improved` | Every non-improvement record (round-trip, audit, C0, C6, C1-lite, guards, caps, exact cases, completeness) and every improvement record (`IA2/improvement`; on confirm also `CA3/breadth`) passed | `correctness`, `unit-tests` and `cost` run |
-| `aa` | Both builds have the same ID and every non-improvement record passed | They run as a check of the harness |
-| `closed` | Anything else: no improvement, an unresolved improvement, or a failed or unresolved quality check | They record `skipped`. The verdict comes from the quality evidence alone |
-
-`compile` and `quality` are always required. `correctness` is required when the gate is
-open, `cost` when the gate is open and correctness found no failure, and `unit-tests` once it
-has started. A required stage that has not finished forces `INCONCLUSIVE` (unless the verdict
-is `ERROR`).
-
-Quality runs before correctness, so some sessions end differently than they would if
-correctness ran first:
-
-| Situation | Verdict |
-| --- | --- |
-| No improvement, incorrect candidate | `NO_IMPROVEMENT`: correctness never ran, and the report says so |
-| Quality failure (C0, C6, a guard) | `CONSTRAINT_VIOLATION`, without running the correctness suite |
-| Improvement, correctness fails | `CONSTRAINT_VIOLATION`; `cost` is skipped |
-| Improvement, baseline fails C1–C5, API or C7 | `baseline/preflight` fails and the evolved half is not checked. `decide` sets aside the quality evidence, so the verdict is `INCONCLUSIVE`; the report says so |
-| No improvement, broken baseline | `NO_IMPROVEMENT`. The report says whether the baseline's correctness is known from the store |
-
-`baseline/preflight` covers the whole baseline half of `correctness`: C1–C5, the API
-contracts and C7.
+[quality](workflow/quality.md#the-quality-gate) owns the gate that controls later stages.
+[decide](workflow/decide.md#committed-evidence-and-required-stages) explains which committed
+stages count, how unfinished stages impose `INCONCLUSIVE`, optional unit tests, and the
+baseline-preflight exception. The estimator and record precedence above stay the same;
+the workflow determines which evidence exists.
 
 ## Diagnostics that never enter a decision
 

@@ -1,5 +1,7 @@
 # The iterations profile
 
+[Documentation index](README.md)
+
 `iterations-profile` is the default profile. It is the **fast inner loop**: small enough to
 run after every change, but with enough seeds to separate a real depth improvement from seed
 noise. When a change looks good here, confirm it once with the broader
@@ -172,7 +174,7 @@ about 10–20 minutes for the companion when required. These are design estimate
 measured runs. There is no calibration step: the cost thresholds are fixed in the policy, and
 the baseline's build and quality compiles are kept in the baseline store for later sessions.
 Building the Qiskit environments dominates the first run; see
-[environments.md](environments.md#how-long-it-takes).
+[environments.md](workflow/compile.md#how-long-it-takes).
 
 ## Declared coverage gaps
 

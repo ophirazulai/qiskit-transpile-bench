@@ -1,4 +1,6 @@
-# The verifier and correctness checks
+# Verifier and check contracts
+
+[Documentation index](README.md) · [quality](workflow/quality.md) · [correctness](workflow/correctness.md)
 
 ## What the verifier is
 
@@ -208,52 +210,9 @@ on the union of wires that either circuit touches (never dropping a logical or a
 Trotter inputs are compared against a frozen product-formula reference circuit, not the exact
 exponential. C1-lite covers **all stages** for the `all_zero` input domain.
 
-## Upstream tests
+## Related stages
 
-Not a verifier function, but also part of correctness (`coordinator/upstream.py`). They are
-**optional**: they form their own stage, `unit-tests`, which either profile may run once the
-quality gate is open, alongside `correctness`. The rule is: **if you run it, it counts.** Once
-the stage has started (running, failed or complete), `decide` requires `IA1/upstream` or
-`CA1/upstream`. If it never started, or the gate skipped it, the verdict is decided without it
-and the report says "Upstream tests: not run."
-
-- The **baseline snapshot's** `test/python/transpiler` and `test/python/compiler` run under
-  pytest against each build. The candidate cannot pass by weakening its own tests.
-- pytest runs with `--rootdir` set to the test copy and `-c` pointing at the snapshot's own
-  pytest configuration (an empty one when the snapshot has none, as Qiskit does). The harness
-  project's settings never apply, and node IDs are identical across revisions.
-- The runner script has a `__main__` guard. Without it, macOS `spawn` workers re-import it
-  and re-run the whole suite, which breaks every parallel-transpile test.
-- `cargo test --locked --no-fail-fast -p qiskit-transpiler` runs in each build's source copy,
-  and failures are parsed test by test.
-- **Stored builds stay unchanged.** The suites never install into a build environment: the
-  test dependencies (`envs/dev-tests.lock`) are installed when the build is made. pytest runs
-  with `PYTHONDONTWRITEBYTECODE=1`, as do the compile workers. The Rust tests of the baseline
-  use a session-local `CARGO_HOME` (`upstream-baseline/cargo`); the evolved build uses its own
-  `cargo/` in the session. `CARGO_TARGET_DIR` is `upstream-<rev>/target`, deleted when the
-  suite ends.
-- **Baseline results from the store.** When both baseline suites completed in an earlier
-  session with the same build, harness, `dev-tests.lock`, baseline test tree, budgets, CPU
-  model and worker environment, their results are read from the store and only the evolved
-  suites run. A/A sessions always run both.
-- **Known-bad baseline failures.** Tests that fail on the baseline are recorded on
-  `*1/upstream/baseline` (result `unresolved`, list in `known_bad`) and never count against
-  the candidate. The evolved build fails only on a **regression**: a test that fails but
-  passed on the baseline, or a baseline-passing test that no longer passes (failed, skipped
-  or missing, for example after a collection error). An incomplete suite gives `unresolved`.
-- The candidate's own Python tests run too, report-only (`upstream-evolved-own.json`).
-- Budgets: 4 h for Python and 3 h for Rust (`policy.json`). A timeout gives `unresolved`.
-- Changed test files are listed in `changed-tests.json`.
-
-Qiskit's own CI runs this suite with stestr (unittest), not pytest. Nine
-`TestUnitarySynthesisPlugin` tests install their mock plugins in `setUpClass` in a way that
-works under unittest but not under pytest, so they appear as known-bad baseline failures.
-
-## Determinism audit
-
-Quality observations must be reproducible. After the B0 block, at least 5% (minimum 10) of
-observations per revision are recompiled, half of them with `PYTHONHASHSEED=1`. Each must
-reproduce the same output hash and layout. If one does not, `audit/determinism` is `unresolved`,
-which makes every quality verdict `unresolved`. The matching baseline quality entries in the
-store are then marked invalid (`invalidated.json`) and never reused; stored correctness and
-unit-test results are kept. Evolved observations are never stored.
+- [quality](workflow/quality.md): when C0, C6, C1-lite and the determinism audit run.
+- [correctness](workflow/correctness.md): baseline preflight, C1–C5, API contracts and C7.
+- [unit-tests](workflow/unit-tests.md): baseline-owned upstream suites, regression comparison,
+  result reuse and the optional-stage rule.
