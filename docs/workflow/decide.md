@@ -75,7 +75,7 @@ one: the extension named there (`lsf.cost_evidence` for an LSF session) re-check
 monitoring evidence of every bundle from its raw counters, ignoring saved labels. A bundle
 that fails, or an extension that is missing or implements another contract, makes that
 panel `unresolved`, never `passed`. The report says which evidence the verdict rests on:
-"monitored (`qtb-lsf-monitor/2`)", "machine mode", or unmonitored results of an older
+"monitored (`qtb-lsf-monitor/3`)", "machine mode", or unmonitored results of an older
 harness, which are labelled as such and never treated as monitored.
 
 When `cost` is `noisy` (its last invocation detected interference, for example after the LSF

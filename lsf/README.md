@@ -21,7 +21,7 @@ left in `src/qtb`, and no retry policy either.
 | Module | Responsibility | In the harness identity |
 | --- | --- | --- |
 | `context.py` | LSF environment → validated execution context; allocation checks | measurement-facing |
-| `cost_monitor.py` | topology and placement, idle probe, counters, checks A and B, thresholds, contamination | measurement-facing |
+| `cost_monitor.py` | topology and placement, idle probe, counters, check A, thresholds, contamination | measurement-facing |
 | `cost_evidence.py` | admission of monitored bundles (reuse, stage, `decide`, replay after cleanup) | measurement-facing |
 | `retry.py` | ledger, attempt accounting, `MAX_COST_RETRIES = 20`, exhaustion | yes |
 | `scheduler.py` | `bsub`/`bjobs`/`bhist`/`bkill`, resource requests, response parsing | yes |
@@ -57,6 +57,6 @@ submitted. `LinuxProbe` parsing is tested against a fake `/proc` tree; the real 
 `launch.json` (`qtb-lsf-launch/1`), `ledger.json` (`qtb-lsf-ledger/1`), `outcomes/*.json`
 (`qtb-lsf-outcome/1`), `report.json` (`qtb-lsf-report/1`), the execution context
 (`qtb-lsf-context/1`), and monitoring evidence in cost bundles
-(`qtb-lsf-monitor-evidence/1`, contract `qtb-lsf-monitor/2`). See
+(`qtb-lsf-monitor-evidence/1`, contract `qtb-lsf-monitor/3`). See
 [output formats](../docs/output-format.md#lsf-orchestration-records) and
 [versioning](../docs/versioning.md).

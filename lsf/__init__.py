@@ -11,7 +11,7 @@ specific to LSF lives here:
                         execution context, installs the cost monitor, writes an outcome
 ``control.py``          ``status``, ``stop`` and ``reap`` for a session's jobs
 ``context.py``          allocation adapter: LSF environment to a validated execution context
-``cost_monitor.py``     quiet-core placement, idle probe, counters, checks A and B
+``cost_monitor.py``     quiet-core placement, idle probe, counters, check A
 ``cost_evidence.py``    validates monitoring evidence for reuse, admission and replay
 ``retry.py``            durable ledger, noise-retry accounting, the retry cap, exhaustion
 ``scheduler.py``        ``bsub``/``bjobs``/``bhist``/``bkill`` and resource requests

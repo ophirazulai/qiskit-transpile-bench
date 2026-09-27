@@ -100,7 +100,7 @@ only by `compile`; an amendment (`lsf/submit.py --resume --upgrade-cost`, or
 | `status` | `created`, then `built` once both builds and the verifier are ready |
 | `coverage_gaps` | The profile's declared coverage gaps |
 | `verifier_python` | The verifier interpreter |
-| `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/2`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
+| `cost_evidence` | Only in sessions created under a measurement extension (every LSF session): the evidence every cost bundle must satisfy. `contract` (`qtb-lsf-monitor/3`), `validator` (`lsf.cost_evidence:validate`), `identity` of the frozen measurement code, `thresholds`, `layout`, `slots`, the approved hardware `tier`, and the `entry_point` that may measure. Recorded at creation, so no bundle can opt out |
 | `amendments` | Only in amended (`qtb-run/4`) sessions: one entry per re-pinning of an unfinished cost stage to a later harness. `index`, `at`, `stage` (`cost`), `reason`, `hashes` (the coordinator and implementation identities the stage now requires, and the new `harness_wheel` hash), `session` (the replaced requirements, for example `cost_evidence`), `previous` (the replaced values, the cost status and the format), and `wheel` (the new harness wheel, `harness-wheel/amendments/<n>/`). Readers apply `session` everywhere and `hashes` only to the named stage; `hashes.harness` (the builds' wheel) never changes. A copy is in `stages/cost/amendment-<n>.json` |
 
 ## `stages/<stage>/state.json`
@@ -142,9 +142,9 @@ one host, in one invocation.
 | `machine`, `measured_at`, `complete` | The cost host and time |
 | `measurement_mode` | `machine` (runner lock and load wait) or `cores` (monitored exclusive cores). Bundles of older harnesses have none and are labelled unmonitored |
 | `worker_jobs` | Every worker job of the regime with its arm, in order |
-| `monitor` | `cores` only (format `qtb-lsf-monitor-evidence/1`): `contract`, `identity`, `attempt`, `host`, `machine`, `allocation` (slots, hosts, the resource request and where it came from, the exclusive-core and single-host requests, the selectors, LSF's CPU lists), `layout` (the mask, the monitor, worker and reserved cores), `tier`, `thresholds`, `thread_scope`, `idle_probe`, and `workers`: one record per actual worker process with `job`, `pid`, `launched`, `exited`, `returncode`, `cpus`, `rusage` and its `windows` (start, end, seconds, busy, worker CPU, foreign CPU, involuntary switches, heartbeat entries, and the A/B results) |
+| `monitor` | `cores` only (format `qtb-lsf-monitor-evidence/1`): `contract`, `identity`, `attempt`, `host`, `machine`, `allocation` (slots, hosts, the resource request and where it came from, the exclusive-core and single-host requests, the selectors, LSF's CPU lists), `layout` (the mask, the monitor, worker and reserved cores), `tier`, `thresholds`, `thread_scope`, `idle_probe`, and `workers`: one record per actual worker process with `job`, `pid`, `launched`, `exited`, `returncode`, `cpus`, `rusage` and its `windows` (start, end, seconds, busy, worker CPU, foreign CPU, heartbeat entries, and the A result) |
 
-The saved A/B results are for reading only: admission recomputes both checks from the
+The saved A results are for reading only: admission recomputes the check from the
 counters ([cost](workflow/cost.md#measurement-modes)). Each worker record also contains
 `measurements`, the acknowledged start/end intervals of its measured entries. Each window's
 `measurement` is the corresponding zero-based interval index, or null outside measured work.

@@ -30,10 +30,9 @@ tag.
 
 ## The monitor contract
 
-Monitored cost evidence follows contract `qtb-lsf-monitor/2`, frozen in
-`lsf/cost_monitor.py`: the checks (A, foreign CPU on the worker core; B, involuntary
-preemption of the worker), their thresholds (15 % of physical-core time with a 0.03 s floor;
-12 switches per second with a floor of 2), which windows are decisive (only measured ones), the 2-second window, the 2-second idle probe, the
+Monitored cost evidence follows contract `qtb-lsf-monitor/3`, frozen in
+`lsf/cost_monitor.py`: the check (A, foreign CPU on the worker core), its threshold (15 % of
+physical-core time with a 0.03 s floor), which windows are decisive (only measured ones), the 2-second window, the 2-second idle probe, the
 nine-core allocation and the CPU layout (monitor on the first core, worker on the second).
 The bundle evidence is tagged `qtb-lsf-monitor-evidence/1`.
 Its worker records include acknowledged measured intervals for every entry. Windows split

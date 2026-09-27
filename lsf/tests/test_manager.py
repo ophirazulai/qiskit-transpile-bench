@@ -503,7 +503,7 @@ def test_an_idle_probe_landing_is_retried_and_reported(world, tmp_path):
     report = read_json(lsf_dir / "report.json")
     first, second = report["cost"]["attempts"]
     assert first["outcome"] == "noisy" and first["phase"] == "idle probe"
-    assert first["involuntary_per_s"] is None and first["foreign_fraction"] > 0.5
+    assert "involuntary_per_s" not in first and first["foreign_fraction"] > 0.5
     assert second["outcome"] == "complete" and second["cpu"] == "Synthetic Xeon"
     assert second["preflight"].endswith("preflight.json")
     assert "idle probe" in (lsf_dir / "report.md").read_text()

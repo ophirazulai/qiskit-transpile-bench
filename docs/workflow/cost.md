@@ -33,8 +33,8 @@ reserved. An allocation it cannot vouch for, unreadable topology or unavailable 
 refuse the stage (exit 41, nothing written).
 
 During measurement it observes every actual worker process, including the fresh process
-after a per-entry timeout, from launch to exit in bounded windows (2 s), and applies two
-checks to every window. Only windows inside a measured interval are decisive: setup,
+after a per-entry timeout, from launch to exit in bounded windows (2 s), and applies one
+check to every window. Only windows inside a measured interval are decisive: setup,
 imports, warmup and reporting windows are judged and recorded but never abort, because no
 timed sample comes from them.
 
@@ -47,7 +47,11 @@ the worker's timers and must be included in cluster overhead calibration.
 | Check | Measured | Accepted when |
 | --- | --- | --- |
 | A. Foreign CPU activity | Busy time of the worker core, all SMT siblings, less the CPU time of the worker and its descendants over the same window | At most 15 % of physical-core time (at least 0.03 s for short windows) |
-| B. Involuntary preemption | The worker's involuntary context switches over the same window, all threads and live descendants; the final window is completed from the reaped worker's usage | At most 12 per second (at least 2 for short windows) |
+
+Involuntary context switches are not checked. The worker's own threads (Qiskit's Rust
+thread pool as well as the Python thread) all run on the one worker core and preempt each
+other, so the count cannot tell interference apart from the worker's own work. Contract
+`qtb-lsf-monitor/3` dropped that check (check B) for this reason.
 
 The first failing measured window stops and reaps the worker, keeps its diagnostics
 (`cost/monitor/<job key>/contamination*.json`, and `contaminated.json` in the interrupted
@@ -57,10 +61,10 @@ missing sample, an invalid counter or a moved CPU mask is never clean: it fails 
 (exit 40). The machine-wide runner lock and the host-load wait do not apply in this mode:
 they describe the whole host, not the allocated cores.
 
-The checks detect CPU interference; they do not prove the absence of shared-cache,
+The check detects CPU interference; they do not prove the absence of shared-cache,
 memory-bandwidth, frequency or thermal effects. The paired, interleaved protocol below
 remains the defense against those. The thresholds are starting points frozen with contract
-`qtb-lsf-monitor/2` and must be calibrated on the chosen tier
+`qtb-lsf-monitor/3` and must be calibrated on the chosen tier
 ([validation](../validation.md#monitored-cost-on-lsf)).
 
 **Machine (`machine`), direct runs.** Without a monitor the stage takes an exclusive per-user

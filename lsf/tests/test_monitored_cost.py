@@ -120,7 +120,7 @@ def test_monitored_cost_is_admitted_replayed_and_survives_cleanup(monitored):
     assert outcome["exit_code"] == 0 and outcome["state"]["status"] == "complete"
     code, decision = decide(world.session, progress=QUIET)
     assert decision["status"] == "PASS"
-    assert any("monitored (qtb-lsf-monitor/2)" in note for note in decision["notes"])
+    assert any("monitored (qtb-lsf-monitor/3)" in note for note in decision["notes"])
     assert clean(world.session, progress=QUIET) == 0
     # Replay after cleanup: the bundles and their monitoring evidence were kept.
     assert decide(world.session, progress=QUIET)[1]["status"] == "PASS"
@@ -284,7 +284,6 @@ def test_validator_problems_for_crafted_evidence():
         "busy_s": 1.0,
         "worker_cpu_s": 1.0,
         "foreign_s": 0.0,
-        "involuntary": 0,
         "final": True,
         "measurement": 0,
     }
@@ -335,7 +334,7 @@ def test_validator_problems_for_crafted_evidence():
     assert problems(bundle, required, estimator="timing", count=1, cases=["c"]) == []
     validate(bundle, required, estimator="timing", count=1, cases=["c"])
     broken = copy.deepcopy(bundle)
-    broken["monitor"]["workers"][0]["windows"][0]["involuntary"] = math.nan
+    broken["monitor"]["workers"][0]["windows"][0]["foreign_s"] = math.nan
     assert "invalid counters" in " ".join(
         problems(broken, required, estimator="timing", count=1, cases=["c"])
     )
@@ -357,7 +356,7 @@ def test_validator_problems_for_crafted_evidence():
         validate(broken, required, estimator="timing", count=1, cases=["c"])
     # Noise in setup (before the measured interval) is recorded but not decisive...
     noisy = dict(window, measurement=None, final=False, busy_s=1.0, worker_cpu_s=0.5)
-    noisy.update(foreign_s=0.5, involuntary=50, a="fail", b="fail")
+    noisy.update(foreign_s=0.5, a="fail")
     timed = dict(window, index=1, start=1.0, end=2.0)
     setup = copy.deepcopy(bundle)
     for worker in setup["monitor"]["workers"]:
@@ -367,4 +366,4 @@ def test_validator_problems_for_crafted_evidence():
     for worker in setup["monitor"]["workers"]:
         worker["windows"][1] = dict(noisy, index=1, start=1.0, end=2.0, measurement=0, final=True)
     found = " ".join(problems(setup, required, estimator="timing", count=1, cases=["c"]))
-    assert "A: foreign CPU" in found and "B:" in found
+    assert "A: foreign CPU" in found

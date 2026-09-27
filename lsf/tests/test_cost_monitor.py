@@ -14,7 +14,6 @@ from lsf.cost_monitor import (
     LinuxProbe,
     MonitorFailure,
     check_a,
-    check_b,
     judge,
 )
 from lsf.tests.conftest import HOST, SyntheticProbe, cost_context, drive
@@ -40,13 +39,9 @@ def test_checks_have_floors_for_short_windows_and_scale_with_long_ones():
     t = THRESHOLDS
     assert check_a(0.03, 0.1, t)[0] and not check_a(0.031, 0.1, t)[0]
     assert check_a(0.3, 2.0, t)[0] and not check_a(0.31, 2.0, t)[0]
-    assert check_b(2, 0.1, t)[0] and not check_b(3, 0.1, t)[0]
-    assert check_b(24, 2.0, t)[0] and not check_b(25, 2.0, t)[0]
-    window = {"seconds": 2.0, "foreign_s": 0.5, "involuntary": 30}
-    reasons = judge(window, t)
-    assert [r[:2] for r in reasons] == ["A:", "B:"]
-    assert judge(dict(window, foreign_s=0.0), t)[0].startswith("B:")
-    assert judge(dict(window, involuntary=0), t)[0].startswith("A:")
+    window = {"seconds": 2.0, "foreign_s": 0.5}
+    assert [r[:2] for r in judge(window, t)] == ["A:"]
+    assert judge(dict(window, foreign_s=0.0), t) == []
 
 
 def test_preflight_pins_disjoint_full_cores_and_probes_the_idle_worker_core(
@@ -89,8 +84,8 @@ def test_preflight_refuses_unreadable_topology_missing_counters_and_foreign_mask
     with pytest.raises(Precondition, match="topology of CPU 0 is unreadable"):
         monitor(tmp_path, probe).prepare(comparison())
     probe = SyntheticProbe()
-    probe.unavailable = lambda: "involuntary context-switch counters are unavailable"
-    with pytest.raises(Precondition, match="context-switch counters"):
+    probe.unavailable = lambda: "per-core counters and CPU affinity need Linux /proc"
+    with pytest.raises(Precondition, match="per-core counters"):
         monitor(tmp_path, probe).prepare(comparison())
     with pytest.raises(Precondition, match="differs from LSF's bind_cpus"):
         monitor(tmp_path, SyntheticProbe(), LSB_BIND_CPU_LIST="0-8").prepare(comparison())
@@ -144,7 +139,8 @@ def test_clean_workers_are_covered_launch_to_exit_in_bounded_windows(
     assert windows[0]["start"] == first["launched"] and windows[-1]["end"] == first["exited"]
     assert all(a["end"] == b["start"] for a, b in zip(windows, windows[1:], strict=False))
     assert all(w["seconds"] <= THRESHOLDS["window_s"] + 0.11 for w in windows)
-    assert all(w["a"] == w["b"] == "pass" for w in windows)
+    assert all(w["a"] == "pass" and "b" not in w for w in windows)
+    assert all("involuntary" not in w for w in windows)
     assert abs(sum(w["worker_cpu_s"] for w in windows) - first["rusage"]["cpu_s"]) < 1e-6
     assert windows[-1]["entries"][1] == 3
 
@@ -157,7 +153,7 @@ def test_brief_contamination_aborts_on_its_own_window_not_diluted(tmp_path, fast
     problem = drive(hooks, probe, 100, seconds=60, measured_entries=3)
     assert isinstance(problem, Contaminated)
     window = problem.evidence["window"]
-    assert window["a"] == "fail" and window["b"] == "pass"
+    assert window["a"] == "fail"
     assert window["measurement"] is not None
     assert window["start"] <= 20.8 and window["end"] >= 20.0
     record = m._bundles["session"][0]
@@ -165,25 +161,16 @@ def test_brief_contamination_aborts_on_its_own_window_not_diluted(tmp_path, fast
     assert (tmp_path / "diagnostics/contamination-1.json").exists()
 
 
-def test_preemption_alone_fails_check_b(tmp_path, fast_thresholds):
-    probe = SyntheticProbe(preemption=lambda t: 50.0 if t > 5 else 0.5)
-    m = prepared(tmp_path, probe)
-    problem = drive(m.worker_hooks("0-x-baseline"), probe, 100, seconds=20, measured_entries=4)
-    assert problem.evidence["window"]["a"] == "pass"
-    assert problem.evidence["window"]["b"] == "fail"
-
-
 def test_noisy_setup_warmup_and_reporting_windows_are_recorded_but_never_abort(
     tmp_path, fast_thresholds
 ):
-    # A foreign process and heavy preemption while the worker imports and warms up (the
-    # first 3 s of its life) and again while it reports; its measured intervals are clean.
+    # A foreign process while the worker imports and warms up (the first 3 s of its life)
+    # and again while it reports; its measured intervals are clean.
     probe = SyntheticProbe()
     m = prepared(tmp_path, probe)
     t0 = probe.t
     noisy = lambda t: t < t0 + 3.0 or t > t0 + 9.0  # noqa: E731
     probe.foreign = lambda t: 1.0 if noisy(t) else 0.0
-    probe.preemption = lambda t: 50.0 if noisy(t) else 0.5
     hooks = m.worker_hooks("0-batch-baseline")
     hooks.spawn_options()
     probe.start(100)
@@ -207,38 +194,17 @@ def test_noisy_setup_warmup_and_reporting_windows_are_recorded_but_never_abort(
     unmeasured = [w for w in record["windows"] if w["measurement"] is None]
     measured = [w for w in record["windows"] if w["measurement"] is not None]
     assert {w["measurement"] for w in measured} == {0, 1, 2}
-    assert all(w["a"] == w["b"] == "pass" for w in measured)
-    assert unmeasured[0]["a"] == unmeasured[0]["b"] == "fail"
-    assert unmeasured[-2]["a"] == unmeasured[-2]["b"] == "fail"  # before the brief final one
+    assert all(w["a"] == "pass" for w in measured)
+    assert unmeasured[0]["a"] == "fail"
+    assert unmeasured[-2]["a"] == "fail"  # before the brief final one
 
 
-def test_the_same_noise_inside_a_measured_interval_aborts(tmp_path, fast_thresholds):
-    probe = SyntheticProbe(preemption=lambda t: 50.0)
+def test_the_same_noise_inside_a_measured_interval_aborts(tmp_path, probe, fast_thresholds):
     m = prepared(tmp_path, probe)
+    probe.foreign = lambda t: 0.5  # after the clean idle probe
     problem = drive(m.worker_hooks("0-x-baseline"), probe, 100, seconds=6, measured_entries=3)
     assert isinstance(problem, Contaminated)
     assert problem.evidence["window"]["measurement"] == 0
-
-
-def test_the_final_window_is_completed_from_the_reaped_workers_usage(
-    tmp_path, probe, fast_thresholds
-):
-    m = prepared(tmp_path, probe)
-    hooks = m.worker_hooks("0-x-baseline")
-    hooks.spawn_options()
-    probe.start(100)
-    hooks.launched(100)
-    probe.advance(0.5)
-    hooks.exited(100)
-    # Threads that ended took 40 switches out of /proc; the worker's rusage keeps them.
-    probe.switches += 40
-    probe.dead_thread_switches = 40
-    probe.stop()
-    # The final window falls after the last measured interval: recorded, never decisive.
-    assert hooks.reaped(100, 0) is None
-    final = m.end_bundle("session")["workers"][0]["windows"][-1]
-    assert final["final"] and final["measurement"] is None
-    assert final["involuntary"] >= 40 and final["b"] == "fail"
 
 
 def test_every_process_of_a_timeout_restart_is_monitored(tmp_path, probe, fast_thresholds):
@@ -289,21 +255,17 @@ def fake_proc(tmp_path):
         "cpu0 100 0 50 900 10 5 5 0 0 0\n"
         "cpu1 200 10 20 900 10 0 0 3 7 0\n"
     )
-    (proc / "self" / "status").write_text("nonvoluntary_ctxt_switches:\t4\n")
 
     def process(pid, ppid, times, tasks):
         (proc / str(pid) / "task").mkdir(parents=True)
         fields = ["S", str(ppid)] + ["0"] * 9 + [str(t) for t in times] + ["0"] * 20
         (proc / str(pid) / "stat").write_text(f"{pid} (py thon) " + " ".join(fields))
-        for tid, switches in tasks.items():
+        for tid in tasks:
             (proc / str(pid) / "task" / str(tid)).mkdir()
-            (proc / str(pid) / "task" / str(tid) / "status").write_text(
-                f"Name:\tpython\nnonvoluntary_ctxt_switches:\t{switches}\n"
-            )
 
-    process(10, 1, [100, 50, 7, 3], {10: 5, 11: 2})
-    process(12, 10, [20, 10, 0, 0], {12: 1})
-    process(13, 99, [999, 999, 0, 0], {13: 100})
+    process(10, 1, [100, 50, 7, 3], [10, 11])
+    process(12, 10, [20, 10, 0, 0], [12])
+    process(13, 99, [999, 999, 0, 0], [13])
     for cpu, siblings in ((0, "0,56"), (1, "1-2")):
         (cpus / f"cpu{cpu}" / "topology").mkdir(parents=True)
         (cpus / f"cpu{cpu}" / "topology" / "thread_siblings_list").write_text(siblings + "\n")
@@ -322,7 +284,7 @@ def test_linux_counters_parse_proc_and_sys(tmp_path):
         probe.cpu_busy([5])
     assert probe.descendants(10) == [12]
     assert probe.process_cpu(10) == {10: pytest.approx(1.6), 12: pytest.approx(0.3)}
-    assert probe.involuntary(10) == {"10/10": 5, "10/11": 2, "12/12": 1}
+    assert probe.tasks(10) == [10, 11]
     assert probe.siblings(0) == [0, 56] and probe.siblings(1) == [1, 2]
     assert probe.siblings(7) is None
     assert probe.online_cpus() == [0, 1]
@@ -342,13 +304,6 @@ def test_setup_cannot_dilute_noise_in_a_short_measurement(tmp_path, probe, fast_
     assert isinstance(problem, Contaminated)
     assert problem.evidence["window"]["seconds"] == pytest.approx(0.1)
     assert problem.evidence["window"]["measurement"] == 0
-
-
-def test_missing_thread_counters_are_not_zero_preemption(tmp_path):
-    probe = fake_proc(tmp_path)
-    (probe.proc / "10/task/11/status").write_text("Name: python\n")
-    with pytest.raises(MonitorFailure, match="missing involuntary counter"):
-        probe.involuntary(10)
 
 
 def test_descendants_cannot_escape_the_worker_core(tmp_path, probe, fast_thresholds):

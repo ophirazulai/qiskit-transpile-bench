@@ -209,7 +209,7 @@ Where things are, under `<results-root>.lsf/logs/<run>/`:
   topology, pins itself to the first core and the serial cost worker to the second, and
   probes the worker core while nothing runs. During measurement it checks, in bounded
   windows of every worker process: **A**, foreign CPU time on the worker core (all SMT
-  siblings) and **B**, involuntary preemption of the worker. The first failing measured
+  siblings). The first failing measured
   window aborts the measurement (setup and warmup windows are recorded but never abort); the job exits 42 and the stage is `noisy`. Details: [cost](workflow/cost.md#measurement-modes).
 - **Retries.** After a `noisy` cost job the manager submits a new cost job, which is placed
   afresh and avoids the hosts that were noisy before (`hname != ...` in its `select[]`): a
@@ -380,9 +380,8 @@ Each stage can run on a different host. Then:
 
 ## Still to calibrate on your cluster
 
-The monitoring thresholds and window length are frozen with contract `qtb-lsf-monitor/2`
-(foreign CPU below 15 % of physical-core time, at most 12 involuntary switches per second,
-2-second windows, only measured windows decisive); they are IOCR's starting values. Before relying on cost verdicts, run
+The monitoring thresholds and window length are frozen with contract `qtb-lsf-monitor/3`
+(foreign CPU below 15 % of physical-core time, 2-second windows, only measured windows decisive); they are IOCR's starting values. Before relying on cost verdicts, run
 quiet A/A sessions and controlled contention on the chosen tier to establish the false
 rejection rate and the monitoring overhead ([validation](validation.md#monitored-cost-on-lsf)).
 Changing a threshold is a new contract version.

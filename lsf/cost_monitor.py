@@ -8,22 +8,24 @@ worker, and probes that worker core while nothing timed runs. The other seven st
 
 During measurement the monitor observes every actual worker process through the harness's
 worker lifecycle hooks, in bounded windows from launch to exit (``window_s``), and applies
-two checks to every window:
+one check to every window:
 
 - **A. Foreign CPU activity**: busy time of the worker core, all SMT siblings included, less
   the CPU time of the worker and its descendants over the same window, as a fraction of
   physical-core time.
-- **B. Involuntary preemption**: the worker's involuntary context switches over the same
-  window, summed over all its threads and live descendants, per second.
+
+Involuntary context switches are not checked (contract 3 dropped check B): the worker's
+own threads, all pinned to the one worker core, preempt each other, so the count does not
+tell interference from the worker's own work.
 
 Only windows inside a measured interval (between the worker's acknowledged ``B`` and ``E``
 boundaries) are decisive. Setup, imports, warmup and reporting windows are judged and
 recorded, but produce no timed sample, so they never abort: short start-up windows fail the
-floors on the worker's own start-up alone. The first decisive window that fails either
-check aborts the measurement: the worker is stopped and reaped and ``Contaminated`` is
+floor on the worker's own start-up alone. The first decisive window that fails the check
+aborts the measurement: the worker is stopped and reaped and ``Contaminated`` is
 raised, which ends the stage ``noisy``. Missing samples,
 invalid counters or a changed CPU mask are never clean: they raise ``MonitorFailure``. The
-checks detect CPU interference; they do not prove the absence of shared-cache,
+check detects CPU interference; they do not prove the absence of shared-cache,
 memory-bandwidth, frequency or thermal effects.
 
 The thresholds are frozen with the contract (``CONTRACT``). The values are IOCR's starting
@@ -45,13 +47,13 @@ from lsf import logging as log
 from lsf import measurement_identity
 from lsf.context import allocation_problems, parse_cpu_list
 
-CONTRACT = "qtb-lsf-monitor/2"
+CONTRACT = "qtb-lsf-monitor/3"
 EVIDENCE_FORMAT = "qtb-lsf-monitor-evidence/1"
 COST_SLOTS = 9
 LAYOUT = "monitor=core0,worker=core1,reserved=core2-8"
 THREAD_SCOPE = (
-    "all worker threads and live descendants; the final window is completed from "
-    "getrusage(RUSAGE_CHILDREN) of the reaped worker"
+    "all worker threads and live descendants, reaped children included "
+    "(utime + stime + cutime + cstime)"
 )
 THRESHOLDS = {
     # Bounded windows during a worker's life, and the idle probe before measuring.
@@ -61,10 +63,6 @@ THRESHOLDS = {
     # floor for clock-tick granularity in short windows.
     "foreign_cpu_fraction": 0.15,
     "foreign_cpu_floor_s": 0.03,
-    # B: involuntary switches of the serial worker per second, with a floor for short
-    # windows. Not multiplied by the nine allocated slots.
-    "involuntary_per_s": 12.0,
-    "involuntary_floor": 2,
 }
 
 
@@ -77,18 +75,13 @@ def check_a(foreign_s, seconds, thresholds):
     return foreign_s <= limit, limit
 
 
-def check_b(involuntary, seconds, thresholds):
-    limit = max(thresholds["involuntary_per_s"] * seconds, thresholds["involuntary_floor"])
-    return involuntary <= limit, limit
-
-
 def decisive(window):
     """Whether a failed check in ``window`` voids the measurement: only measured windows."""
     return window.get("measurement") is not None
 
 
 def judge(window, thresholds):
-    """Both checks from a window's raw counters; the reasons it fails, empty when clean."""
+    """Check A from a window's raw counters; the reasons it fails, empty when clean."""
     seconds = window["seconds"]
     reasons = []
     ok, limit = check_a(window["foreign_s"], seconds, thresholds)
@@ -96,12 +89,6 @@ def judge(window, thresholds):
         reasons.append(
             f"A: foreign CPU {window['foreign_s']:.3f} s > {limit:.3f} s "
             f"({thresholds['foreign_cpu_fraction']:.0%} of {seconds:.2f} s)"
-        )
-    ok, limit = check_b(window["involuntary"], seconds, thresholds)
-    if not ok:
-        reasons.append(
-            f"B: {window['involuntary']} involuntary switches > {limit:.1f} "
-            f"({thresholds['involuntary_per_s']:g}/s over {seconds:.2f} s)"
         )
     return reasons
 
@@ -116,9 +103,6 @@ class LinuxProbe:
     def unavailable(self):
         if not hasattr(os, "sched_setaffinity") or not (self.proc / "stat").exists():
             return "per-core counters and CPU affinity need Linux /proc and sched_setaffinity"
-        status = self.proc / "self" / "status"
-        if "nonvoluntary_ctxt_switches" not in status.read_text(errors="replace"):
-            return "involuntary context-switch counters are unavailable"
         return None
 
     def now(self):
@@ -209,33 +193,10 @@ class LinuxProbe:
             seconds[process] = sum(int(value) for value in fields[11:15]) / self.tick
         return seconds
 
-    def involuntary(self, pid):
-        """``{"pid/tid": switches}`` for every live thread of ``pid`` and its descendants."""
-        counts = {}
-        for process in [pid, *self.descendants(pid)]:
-            try:
-                tids = self.tasks(process)
-            except OSError:
-                if process == pid:
-                    raise
-                continue
-            for tid in tids:
-                path = self.proc / str(process) / "task" / str(tid) / "status"
-                try:
-                    text = path.read_text()
-                except OSError:
-                    continue
-                for line in text.splitlines():
-                    if line.startswith("nonvoluntary_ctxt_switches:"):
-                        counts[f"{process}/{tid}"] = int(line.split()[1])
-                        break
-                else:
-                    raise MonitorFailure(f"missing involuntary counter for {process}/{tid}")
-        return counts
-
     def children_usage(self):
+        """CPU seconds of all reaped children of this process."""
         usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-        return usage.ru_utime + usage.ru_stime, usage.ru_nivcsw
+        return usage.ru_utime + usage.ru_stime
 
 
 def _finite(*values):
@@ -532,7 +493,6 @@ class WorkerHooks:
                 "time": now,
                 "busy": probe.cpu_busy(self.cpus),
                 "cpu": probe.process_cpu(self.pid),
-                "involuntary": probe.involuntary(self.pid),
                 "entries": self.entries,
             }
         except (OSError, ValueError, IndexError) as exc:
@@ -567,12 +527,10 @@ class WorkerHooks:
         self.window = self._sample(now)
 
     def _close(self, end, final):
-        """One window's deltas, isolated per actual process and thread.
+        """One window's deltas, isolated per actual process.
 
         A descendant that disappeared was reaped into its parent's child time, which now
-        includes what earlier windows already counted for it; that part is taken off. A
-        thread that ended takes its last few switches with it; the final window is
-        completed from the reaped worker's exact usage.
+        includes what earlier windows already counted for it; that part is taken off.
         """
         start = self.window
         seconds = end["time"] - start["time"]
@@ -580,19 +538,10 @@ class WorkerHooks:
         before, after = start["cpu"], end["cpu"]
         cpu = sum(value - before.get(pid, 0) for pid, value in after.items())
         cpu -= sum(value for pid, value in before.items() if pid not in after and pid != self.pid)
-        counts_before, counts_after = start["involuntary"], end["involuntary"]
-        deltas = [value - counts_before.get(key, 0) for key, value in counts_after.items()]
-        involuntary = sum(deltas)
-        if not _finite(seconds, busy, cpu, involuntary) or seconds <= 0:
+        if not _finite(seconds, busy, cpu) or seconds <= 0:
             raise MonitorFailure(f"invalid monitor window for {self.label}")
-        if (
-            busy < 0
-            or any(d < 0 for d in deltas)
-            or after.get(self.pid, 0) < before.get(self.pid, 0)
-        ):
+        if busy < 0 or after.get(self.pid, 0) < before.get(self.pid, 0):
             raise MonitorFailure(f"a monitor counter went backwards for {self.label}")
-        if self.measuring is not None and counts_before.keys() - counts_after.keys():
-            raise MonitorFailure(f"thread counters disappeared during measured work: {self.label}")
         cpu = max(cpu, 0.0)
         window = {
             "index": len(self.record["windows"]),
@@ -602,7 +551,6 @@ class WorkerHooks:
             "busy_s": busy,
             "worker_cpu_s": cpu,
             "foreign_s": busy - cpu,
-            "involuntary": involuntary,
             "entries": [start["entries"], end["entries"]],
             "final": final,
             "measurement": self.measuring,
@@ -639,12 +587,11 @@ class WorkerHooks:
     def _judge(self, window):
         monitor = self.monitor
         reasons = judge(window, monitor.thresholds)
-        window["a"] = "fail" if any(r.startswith("A:") for r in reasons) else "pass"
-        window["b"] = "fail" if any(r.startswith("B:") for r in reasons) else "pass"
+        window["a"] = "fail" if reasons else "pass"
         self.record["windows"].append(window)
         monitor.defer(
             "monitor.window",
-            f"{self.label} window {window['index']}: A {window['a']}, B {window['b']}",
+            f"{self.label} window {window['index']}: A {window['a']}",
             job=self.label,
             window=window["index"],
             counters=window,
@@ -672,14 +619,10 @@ class WorkerHooks:
     def reaped(self, pid, returncode):
         monitor = self.monitor
         monitor.active = None
-        cpu, involuntary = (
-            after - before
-            for after, before in zip(monitor.probe.children_usage(), self.usage, strict=True)
-        )
         self.record.update(
             exited=monitor.clock(),
             returncode=returncode,
-            rusage={"cpu_s": cpu, "involuntary": involuntary},
+            rusage={"cpu_s": monitor.probe.children_usage() - self.usage},
         )
         if self.aborted:
             monitor.flush_log()
@@ -687,9 +630,6 @@ class WorkerHooks:
         if self.final is None:
             raise MonitorFailure(f"no final monitor window for {self.label}")
         final = self.final
-        # Threads that ended are missing from /proc; the reaped worker's usage is exact.
-        counted = sum(w["involuntary"] for w in self.record["windows"])
-        final["involuntary"] = max(final["involuntary"], involuntary - counted)
         self.record["exited"] = final["end"]
         problem = self._judge(final)
         monitor.flush_log()

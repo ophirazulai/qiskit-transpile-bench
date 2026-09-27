@@ -45,7 +45,6 @@ def _job(entry):
         "evidence": contamination.get("diagnostics"),
         "phase": contamination.get("phase") or ("measurement" if window else None),
         "foreign_fraction": rate(window.get("foreign_s")),
-        "involuntary_per_s": rate(window.get("involuntary")),
         "cpu": (monitor.get("machine") or {}).get("cpu"),
         "layout": monitor.get("layout"),
         "preflight": monitor.get("preflight"),
@@ -171,13 +170,11 @@ def render(content):
         lines += [f"Cost retries stopped: {cost['stopped']['reason']}.", ""]
     if cost["attempts"]:
         lines += [
-            "| Attempt | Job | Outcome | Host | CPU | Phase | Foreign CPU | Involuntary/s "
-            "| Evidence |",
-            "| ---: | --- | --- | --- | --- | --- | ---: | ---: | --- |",
+            "| Attempt | Job | Outcome | Host | CPU | Phase | Foreign CPU | Evidence |",
+            "| ---: | --- | --- | --- | --- | --- | ---: | --- |",
         ]
         for job in cost["attempts"]:
             fraction = job["foreign_fraction"]
-            rate = job["involuntary_per_s"]
             lines.append(
                 "| "
                 + " | ".join(
@@ -190,7 +187,6 @@ def render(content):
                         job["cpu"],
                         job["phase"],
                         f"{fraction:.1%}" if fraction is not None else None,
-                        f"{rate:.1f}" if rate is not None else None,
                         job["evidence"] or job["preflight"] or (job["logs"] or {}).get("log"),
                     )
                 )

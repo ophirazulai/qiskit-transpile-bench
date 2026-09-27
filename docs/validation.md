@@ -48,7 +48,7 @@ not measurements of an evolved Qiskit revision.
   job with fixed allocations, a durable ledger with restart-safe cost retries (one initial job
   and at most 20 retries), deadline and cancellation handling, `status`/`stop`/`reap`, an
   orchestration report and structured logs. A cost monitor on nine exclusive cores with an
-  idle probe and checks A and B per window, and an evidence validator that `decide` applies
+  idle probe and check A per window, and an evidence validator that `decide` applies
   to every monitored bundle, also after `clean`.
 
 ## Implementation validation (2026-09-24)
@@ -98,17 +98,27 @@ they do not validate a runner or demonstrate a candidate improvement.
 Nothing has been submitted to LSF: the orchestration is validated against a fake scheduler
 only, and the monitor's thresholds are uncalibrated.
 
+## Check B removed (2026-09-27)
+
+In the cluster A/A session `aa-20260926_v2`, measured windows failed check B at 200–336
+involuntary switches per second while their foreign CPU was about 0 %. The switches came
+from the worker itself: Qiskit keeps a Rust (rayon) pool thread even with
+`RAYON_NUM_THREADS=1`, and it hands work back and forth with the Python thread on the one
+pinned worker core. Contract `qtb-lsf-monitor/3` therefore keeps only check A; the
+worker windows and the evidence no longer record involuntary switches. The earlier
+sections describe the contract-2 monitor as it was validated then.
+
 ## Monitored cost on LSF
 
 Before relying on cost verdicts from the cluster, on the selected hardware tier and CPU
 layout:
 
-1. Run quiet A/A sessions and record every window's foreign fraction and involuntary rate, to
+1. Run quiet A/A sessions and record every window's foreign fraction, to
    set the thresholds, the window length and the false-rejection rate. Include `DEBUG`
    logging in the overhead measurement.
 2. Inject controlled contention only inside allocations you own: load on the worker core, on
    its SMT sibling, and on other cores of the allocation stressing shared cache and memory
-   bandwidth. Checks A and B must catch the first two; the third is outside what they detect.
+   bandwidth. Check A must catch the first two; the third is outside what it detects.
 3. Run end-to-end A/A and known-slowdown sessions through `lsf/submit.py`: clean runs keep
    their expected outcomes, contaminated runs are resubmitted, a genuine regression survives
    the policy rerun, exhaustion never produces a `PASS`, and no job remains after the manager

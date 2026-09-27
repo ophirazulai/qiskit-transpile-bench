@@ -11,8 +11,8 @@ judge or replay, including ``decide`` run directly or after ``clean``
 - has a clean idle probe;
 - covers every worker job of the bundle, both arms, each actual process from launch to
   exit in contiguous windows ending with a final one, with finite counters;
-- passes checks A and B in every measured window when they are recomputed from the raw
-  counters (setup, warmup and reporting windows are not decisive: ``decisive``).
+- passes check A in every measured window when it is recomputed from the raw counters
+  (setup, warmup and reporting windows are not decisive: ``decisive``).
 
 Saved ``pass`` labels and verdicts are never trusted.
 """
@@ -193,11 +193,11 @@ def _record_problems(record, thresholds, worker_cpus):
         found.append(f"{name}: no single final window")
     for previous, window in zip([None, *windows], windows, strict=False):
         values = [window.get(k) for k in ("start", "end", "seconds", "busy_s", "worker_cpu_s")]
-        values += [window.get("foreign_s"), window.get("involuntary")]
+        values.append(window.get("foreign_s"))
         if not all(_number(v) for v in values) or window["seconds"] <= 0:
             found.append(f"{name} window {window.get('index')}: invalid counters")
             break
-        if any(window[k] < 0 for k in ("busy_s", "worker_cpu_s", "involuntary")):
+        if any(window[k] < 0 for k in ("busy_s", "worker_cpu_s")):
             found.append(f"{name} window {window.get('index')}: invalid counters")
             break
         if previous is not None and abs(window["start"] - previous["end"]) > TOLERANCE_S:
@@ -259,5 +259,4 @@ def summary(bundle):
     return {
         "windows": len(windows),
         "max_foreign_fraction": max(w["foreign_s"] / w["seconds"] for w in windows),
-        "max_involuntary_per_s": max(w["involuntary"] / w["seconds"] for w in windows),
     }

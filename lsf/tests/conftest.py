@@ -49,27 +49,23 @@ def cost_context(**overrides):
 class SyntheticProbe:
     """A host with SMT pairs (cpu n and n + 56), a virtual clock and scripted counters.
 
-    ``foreign(t)`` is the foreign busy fraction of the worker core at virtual time ``t``,
-    ``preemption(t)`` the worker's involuntary switches per second. The worker, while it
-    runs, uses ``worker_rate`` CPU seconds per second.
+    ``foreign(t)`` is the foreign busy fraction of the worker core at virtual time ``t``.
+    The worker, while it runs, uses ``worker_rate`` CPU seconds per second.
     """
 
-    def __init__(self, mask=None, cores=56, smt=True, foreign=None, preemption=None):
+    def __init__(self, mask=None, cores=56, smt=True, foreign=None):
         self.cores = cores
         self.smt = smt
         self.mask = set(mask if mask is not None else self.cpus_of(range(9)))
         self.t = 0.0
         self.foreign = foreign or (lambda t: 0.0)
-        self.preemption = preemption or (lambda t: 0.5)
         self.worker_rate = 0.98
         self.busy = {}
         self.worker_cpu = 0.0
-        self.switches = 0.0
         self.running = None
         self.affinities = {}
-        self.dead_thread_switches = 0
         self.broken = set()
-        self.children = [0.0, 0]
+        self.children = 0.0
         self.worker_tasks = None
 
     def cpus_of(self, cores):
@@ -129,11 +125,8 @@ class SyntheticProbe:
     def process_cpu(self, pid):
         return {pid: self.worker_cpu}
 
-    def involuntary(self, pid):
-        return {f"{pid}/{pid}": int(self.switches) - self.dead_thread_switches}
-
     def children_usage(self):
-        return tuple(self.children)
+        return self.children
 
     # Scripting
 
@@ -146,11 +139,9 @@ class SyntheticProbe:
     def start(self, pid):
         self.running = pid
         self.worker_cpu = 0.0
-        self.switches = 0.0
 
     def stop(self):
-        self.children[0] += self.worker_cpu
-        self.children[1] += int(self.switches)
+        self.children += self.worker_cpu
         self.running = None
 
     def advance(self, seconds, steps=None):
@@ -165,7 +156,6 @@ class SyntheticProbe:
                     self.busy[cpu] += self.worker_rate * dt
             if self.running is not None:
                 self.worker_cpu += self.worker_rate * dt
-                self.switches += self.preemption(self.t) * dt
             self.t += dt
 
 

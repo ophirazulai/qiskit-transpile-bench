@@ -168,7 +168,7 @@ ln_panel      = Σ_c u_c · ln( t(c, evolved) / t(c, baseline) )   u_c = 1/|pane
   companion and memory use one fresh process per arm and case. The two arms (baseline,
   evolved) run interleaved in random order within each round. Nothing else may run on the
   measured core. On LSF the stage holds nine exclusive physical cores, and a monitor checks
-  every window of every worker for foreign CPU activity and involuntary preemption; the first
+  every window of every worker for foreign CPU activity; the first
   failing measured window discards the invocation (`noisy`) and the manager measures again in a new
   job ([cost](workflow/cost.md#measurement-modes)). Run directly, the stage takes an
   exclusive runner lock and waits up to 5 minutes for the load average to fall below half
